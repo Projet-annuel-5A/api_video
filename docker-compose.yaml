@@ -1,0 +1,13 @@
+services:
+  middleware:
+    build: "./middleware"
+    ports:
+      - "8000:8000"
+  dialogue:
+    build: "./dialogue"
+    ports:
+      - "8001:8001"
+  vision:
+    build: "./vision"
+    ports:
+      - "8002:8002"
