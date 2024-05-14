@@ -170,6 +170,8 @@ class Utils:
     def delete_temp_files(self) -> None:
         shutil.rmtree(self.temp_folder)
         self.log.info('Temporary files deleted')
+        shutil.rmtree(self.input_folder)
+        self.log.info('Input folder deleted')
 
     def end_logs(self) -> None:
         log_handlers = logging.getLogger().handlers[:]
