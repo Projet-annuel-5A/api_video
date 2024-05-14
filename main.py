@@ -18,6 +18,24 @@ app = FastAPI()
 # TODO Move main from root to middleware folder
 
 
+def __init_all(session_id: str, interview_id: str, speaker_name: str) -> None:
+    global utils
+    global asp
+    global ate
+    global drz
+    global stt
+    global tte
+    global vte
+
+    utils = Utils(session_id, interview_id, speaker_name)
+    asp = AudioSplit()
+    ate = AudioEmotions(session_id, interview_id, speaker_name)
+    drz = Diarizator()
+    stt = SpeechToText()
+    tte = TextEmotions(session_id, interview_id, speaker_name)
+    vte = VideoEmotions(session_id, interview_id, speaker_name)
+
+
 def __video_to_audio(video_path: str, audio_path: str) -> None:
     original_stdout = sys.stdout
     original_stderr = sys.stderr
@@ -38,9 +56,6 @@ def __video_to_audio(video_path: str, audio_path: str) -> None:
 
 
 def __analyze_text(queue: Queue) -> None:
-    stt = SpeechToText()
-    tte = TextEmotions()
-
     results = pd.DataFrame(columns=['speaker', 'file', 'text', 'text_emotions'])
 
     files, texts = stt.process_folder('french')
@@ -60,8 +75,6 @@ def __analyze_text(queue: Queue) -> None:
 
 
 def __analyse_video(_speakers: dict, queue: Queue) -> None:
-    vte = VideoEmotions()
-
     results = pd.DataFrame(columns=['speaker', 'file', 'video_emotions'])
 
     files, emotions = vte.process_folder(_speakers)
@@ -76,8 +89,6 @@ def __analyse_video(_speakers: dict, queue: Queue) -> None:
 
 
 def __analyse_audio(queue: Queue) -> None:
-    ate = AudioEmotions()
-
     results = pd.DataFrame(columns=['speaker', 'file', 'audio_emotions'])
 
     files, emotions = ate.process_folder()
@@ -94,7 +105,6 @@ def __analyse_audio(queue: Queue) -> None:
 
 def __split_audio(_audiofile: str, _speakers: dict) -> None:
     utils.log.info('Starting split audio')
-    asp = AudioSplit()
 
     asp.process(_audiofile, _speakers)
     utils.log.info('Split audio finished')
@@ -129,8 +139,6 @@ def __merge_results(evaluations: pd.DataFrame,
 
 
 def __process_all(queue: Queue) -> None:
-    drz = Diarizator()
-
     evaluations = pd.DataFrame(columns=['speaker', 'file', 'text', 'text_emotions', 'video_emotions', 'audio_emotions'])
     text_results = pd.DataFrame(columns=['speaker', 'file', 'text', 'text_emotions'])
     video_results = pd.DataFrame(columns=['speaker', 'file', 'video_emotions'])
@@ -192,8 +200,7 @@ def process(session_id: str, interview_id: str, current_speaker: str) -> None:
     print('Program started')
 
     speaker_name = 'speaker_00{}'.format(current_speaker)
-    global utils
-    utils = Utils(session_id, interview_id, speaker_name)
+    __init_all(session_id, interview_id, speaker_name)
     main_queue = Queue()
 
     utils.log.info("Program started => Session: {} | Interview: {}".format(session_id, interview_id))

@@ -7,8 +7,8 @@ from middleware.utils.utils import Utils
 
 
 class VideoEmotions:
-    def __init__(self) -> None:
-        self.utils = Utils()
+    def __init__(self, session_id: str, interview_id: str, current_speaker: str) -> None:
+        self.utils = Utils(session_id, interview_id, current_speaker)
 
     def __predict(self, image: np.ndarray) -> dict[str, float]:
         inputs = self.utils.vte_processor(image, return_tensors="pt")

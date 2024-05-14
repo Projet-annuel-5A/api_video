@@ -3,8 +3,8 @@ from middleware.utils.utils import Utils
 
 
 class TextEmotions:
-    def __init__(self) -> None:
-        self.utils = Utils()
+    def __init__(self, session_id: str, interview_id: str, current_speaker: str) -> None:
+        self.utils = Utils(session_id, interview_id, current_speaker)
 
     def process_texts(self, all_texts: list[str]) -> list[dict[str, float]]:
         self.utils.log.info('Start processing emotions from {} texts'.format(len(all_texts)))

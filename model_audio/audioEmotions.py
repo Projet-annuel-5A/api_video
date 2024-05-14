@@ -2,13 +2,13 @@ import os
 import torch
 import torchaudio
 import numpy as np
-from middleware.utils.utils import Utils
+from .utils.utils import Utils
 import torch.nn.functional as f
 
 
 class AudioEmotions:
-    def __init__(self) -> None:
-        self.utils = Utils()
+    def __init__(self, session_id: str, interview_id: str, current_speaker: str) -> None:
+        self.utils = Utils(session_id, interview_id, current_speaker)
 
     def __speech_file_to_array_fn(self, path: str, sampling_rate: int) -> np.ndarray:
         speech_array, _sampling_rate = torchaudio.load(path)

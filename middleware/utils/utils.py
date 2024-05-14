@@ -88,9 +88,9 @@ class Utils:
              self.stt_processor,
              self.tte_tokenizer,
              self.tte_model,
-             self.ate_model,
-             self.ate_feature_extractor,
-             self.ate_sampling_rate,
+             #self.ate_model,
+             #self.ate_feature_extractor,
+             #self.ate_sampling_rate,
              self.vte_model,
              self.vte_processor
              ) = self.__init_models()
@@ -112,7 +112,7 @@ class Utils:
             os.makedirs(self.log_folder)
 
         # Configure basic logging settings
-        formatter = '[%(asctime)s] %(levelname)s [%(name)s.%(funcName)s:%(lineno)d] %(message)s'
+        formatter = logging.Formatter('[%(asctime)s] %(levelname)s [%(name)s.%(funcName)s:%(lineno)d] %(message)s')
         date_format = '%d/%b/%Y %H:%M:%S'
         encoding = 'utf-8'
 
@@ -120,13 +120,13 @@ class Utils:
         info_log = os.path.join(self.log_folder, 'log_{}'.format(datetime.now().strftime('%Y_%m_%d_%H.%M.%S')))
         info_handler = BufferingHandler(info_log)
         info_handler.setLevel(logging.INFO)
-        info_handler.setFormatter(logging.Formatter(formatter))
+        info_handler.setFormatter(formatter)
 
         # Create a file handler for ERROR messages
         error_log = os.path.join(self.log_folder, 'errorLog_{}'.format(datetime.now().strftime('%Y_%m_%d_%H.%M.%S')))
         error_handler = BufferingHandler(error_log)
         error_handler.setLevel(logging.ERROR)
-        error_handler.setFormatter(logging.Formatter(formatter))
+        error_handler.setFormatter(formatter)
 
         root_logger.handlers.clear()
 
@@ -141,7 +141,8 @@ class Utils:
         config = configparser.ConfigParser()
         if len(config.sections()) == 0:
             try:
-                path = os.path.join(os.path.dirname(__file__), '../../config', 'config.ini')
+                base_path = os.path.dirname(os.path.dirname(__file__))
+                path = os.path.join(base_path, 'config', 'config.ini')
                 with open(path) as f:
                     config.read_file(f)
             except IOError:
@@ -169,6 +170,7 @@ class Utils:
         tte_model.to(self.device)
         self.log.info('Text-to-emotions model {} and tokenizer loaded in {}'.format(tte_model_id, self.device))
 
+        '''
         # Audio to emotions
         ate_model_id = self.config['AUDIOEMOTIONS']['ModelId']
         ate_model = AutoModelForAudioClassification.from_pretrained(ate_model_id)
@@ -176,7 +178,7 @@ class Utils:
         ate_feature_extractor = Wav2Vec2FeatureExtractor.from_pretrained(ate_model_id)
         ate_sampling_rate = ate_feature_extractor.sampling_rate
         self.log.info('Audio-to-emotions model {} loaded in {}'.format(ate_model_id, self.device))
-
+        '''
         # Video to emotions
         vte_model_id = self.config['VIDEOEMOTION']['ModelId']
         vte_model = AutoModelForImageClassification.from_pretrained(vte_model_id, output_attentions=True)
@@ -189,9 +191,9 @@ class Utils:
                 stt_processor,
                 tte_tokenizer,
                 tte_model,
-                ate_model,
-                ate_feature_extractor,
-                ate_sampling_rate,
+                #ate_model,
+                #ate_feature_extractor,
+                #ate_sampling_rate,
                 vte_model,
                 vte_processor)
 
