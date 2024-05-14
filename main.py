@@ -8,7 +8,6 @@ from moviepy.editor import *
 from middleware.utils.utils import Utils
 from middleware.utils.diarizator import Diarizator
 from middleware.utils.audioSplit import AudioSplit
-from middleware.utils.videoProcess import VideoProcess
 from middleware.utils.speechToText import SpeechToText
 from model_text.textEmotions import TextEmotions
 from model_audio.audioEmotions import AudioEmotions
