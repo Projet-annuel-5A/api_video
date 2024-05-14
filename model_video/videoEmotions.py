@@ -3,7 +3,7 @@ import cv2
 import torch
 import numpy as np
 import torch.nn as nn
-from middleware.utils.utils import Utils
+from .utils.utils import Utils
 
 
 class VideoEmotions:

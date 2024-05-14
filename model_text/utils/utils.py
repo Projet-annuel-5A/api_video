@@ -6,8 +6,8 @@ import warnings
 import configparser
 from datetime import datetime
 warnings.filterwarnings("ignore", category=UserWarning)
-from transformers import (AutoModelForAudioClassification,
-                          Wav2Vec2FeatureExtractor)
+from transformers import (AutoTokenizer,
+                          AutoModelForSequenceClassification)
 
 
 class Utils:
@@ -29,20 +29,18 @@ class Utils:
             base_folder = os.path.join(base_folder, self.config['FOLDERS']['Main'], session_id, interview_id)
             self.output_folder = os.path.join(base_folder, self.config['FOLDERS']['Output'])
             self.log_folder = os.path.join(self.output_folder, current_speaker, 'logs')
-            self.output_audio_folder = os.path.join(self.output_folder, current_speaker, 'audio_parts')
 
             # Create loggers
             self.log = self.__init_logs()
             self.log.propagate = False
 
-            (self.ate_model,
-             self.ate_feature_extractor,
-             self.ate_sampling_rate) = self.__init_models()
+            (self.tte_tokenizer,
+             self.tte_model) = self.__init_models()
 
             self.__initialized = True
 
     def __init_logs(self) -> logging.Logger:
-        logger = logging.getLogger('audio')
+        logger = logging.getLogger('text')
         logger.setLevel(logging.NOTSET)
 
         if not os.path.exists(self.log_folder):
@@ -54,16 +52,15 @@ class Utils:
         encoding = 'utf-8'
 
         # Create a file handler for INFO messages
-        info_audio_log = os.path.join(self.log_folder, 'logAudio_{}'.
-                                      format(datetime.now().strftime('%Y_%m_%d_%H.%M.%S')))
-        info_audio_handler = logging.FileHandler(info_audio_log)
-        info_audio_handler.setLevel(logging.INFO)
-        info_audio_handler.setFormatter(logging.Formatter(formatter))
+        info_text_log = os.path.join(self.log_folder, 'logText_{}'.format(datetime.now().strftime('%Y_%m_%d_%H.%M.%S')))
+        info_text_handler = logging.FileHandler(info_text_log)
+        info_text_handler.setLevel(logging.INFO)
+        info_text_handler.setFormatter(logging.Formatter(formatter))
 
         logger.handlers.clear()
 
         # Add the handlers to the root logger
-        logger.addHandler(info_audio_handler)
+        logger.addHandler(info_text_handler)
         logger.datefmt = date_format
         logger.encoding = encoding
         return logger
@@ -73,23 +70,21 @@ class Utils:
         if len(config.sections()) == 0:
             try:
                 base_path = os.path.dirname(os.path.dirname(__file__))
-                path = os.path.join(base_path, 'config', 'audioConfig.ini')
+                path = os.path.join(base_path, 'config', 'textConfig.ini')
                 with open(path) as f:
                     config.read_file(f)
             except IOError:
-                print("No file 'audioConfig.ini' is present, the program can not continue")
+                print("No file 'textConfig.ini' is present, the program can not continue")
                 sys.exit()
         return config
 
     def __init_models(self) -> tuple:
-        # Audio to emotions
-        ate_model_id = self.config['AUDIOEMOTIONS']['ModelId']
-        ate_model = AutoModelForAudioClassification.from_pretrained(ate_model_id)
-        ate_model.to(self.device)
-        ate_feature_extractor = Wav2Vec2FeatureExtractor.from_pretrained(ate_model_id)
-        ate_sampling_rate = ate_feature_extractor.sampling_rate
-        self.log.info('Audio-to-emotions model {} loaded in {}'.format(ate_model_id, self.device))
+        # Text to emotions
+        tte_model_id = self.config['TEXTEMOTIONS']['ModelId']
+        tte_tokenizer = AutoTokenizer.from_pretrained(tte_model_id)
+        tte_model = AutoModelForSequenceClassification.from_pretrained(tte_model_id)
+        tte_model.to(self.device)
+        self.log.info('Text-to-emotions model {} and tokenizer loaded in {}'.format(tte_model_id, self.device))
 
-        return (ate_model,
-                ate_feature_extractor,
-                ate_sampling_rate)
+        return (tte_tokenizer,
+                tte_model)

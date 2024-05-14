@@ -8,14 +8,8 @@ import configparser
 from datetime import datetime
 warnings.filterwarnings("ignore", category=UserWarning)
 from pyannote.audio import Pipeline as AudioPipeline
-from transformers import (AutoTokenizer,
-                          AutoModelForSequenceClassification,
-                          AutoModelForSpeechSeq2Seq,
-                          AutoProcessor,
-                          AutoModelForAudioClassification,
-                          Wav2Vec2FeatureExtractor,
-                          AutoImageProcessor,
-                          AutoModelForImageClassification)
+from transformers import (AutoModelForSpeechSeq2Seq,
+                          AutoProcessor)
 
 
 # Create custom stream handler
@@ -85,15 +79,7 @@ class Utils:
 
             (self.diarization_pipeline,
              self.stt_model,
-             self.stt_processor,
-             self.tte_tokenizer,
-             self.tte_model,
-             #self.ate_model,
-             #self.ate_feature_extractor,
-             #self.ate_sampling_rate,
-             self.vte_model,
-             self.vte_processor
-             ) = self.__init_models()
+             self.stt_processor) = self.__init_models()
 
             self.__initialized = True
 
@@ -163,39 +149,9 @@ class Utils:
         stt_model.to(self.device)
         stt_processor = AutoProcessor.from_pretrained(stt_model_id)
 
-        # Text to emotions
-        tte_model_id = self.config['TEXTEMOTIONS']['ModelId']
-        tte_tokenizer = AutoTokenizer.from_pretrained(tte_model_id)
-        tte_model = AutoModelForSequenceClassification.from_pretrained(tte_model_id)
-        tte_model.to(self.device)
-        self.log.info('Text-to-emotions model {} and tokenizer loaded in {}'.format(tte_model_id, self.device))
-
-        '''
-        # Audio to emotions
-        ate_model_id = self.config['AUDIOEMOTIONS']['ModelId']
-        ate_model = AutoModelForAudioClassification.from_pretrained(ate_model_id)
-        ate_model.to(self.device)
-        ate_feature_extractor = Wav2Vec2FeatureExtractor.from_pretrained(ate_model_id)
-        ate_sampling_rate = ate_feature_extractor.sampling_rate
-        self.log.info('Audio-to-emotions model {} loaded in {}'.format(ate_model_id, self.device))
-        '''
-        # Video to emotions
-        vte_model_id = self.config['VIDEOEMOTION']['ModelId']
-        vte_model = AutoModelForImageClassification.from_pretrained(vte_model_id, output_attentions=True)
-        vte_model.to(self.device)
-        vte_processor = AutoImageProcessor.from_pretrained(vte_model_id, output_attentions=True)
-        self.log.info('Video-to-emotions model {} loaded in {}'.format(vte_model_id, self.device))
-
         return (diarization_pipeline,
                 stt_model,
-                stt_processor,
-                tte_tokenizer,
-                tte_model,
-                #ate_model,
-                #ate_feature_extractor,
-                #ate_sampling_rate,
-                vte_model,
-                vte_processor)
+                stt_processor)
 
     def check_dirs(self) -> None:
         if not os.path.exists(self.input_folder):

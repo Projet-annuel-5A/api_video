@@ -1,5 +1,5 @@
 import torch
-from middleware.utils.utils import Utils
+from .utils.utils import Utils
 
 
 class TextEmotions:

@@ -6,8 +6,8 @@ import warnings
 import configparser
 from datetime import datetime
 warnings.filterwarnings("ignore", category=UserWarning)
-from transformers import (AutoModelForAudioClassification,
-                          Wav2Vec2FeatureExtractor)
+from transformers import (AutoImageProcessor,
+                          AutoModelForImageClassification)
 
 
 class Utils:
@@ -24,25 +24,25 @@ class Utils:
 
             self.device = "cuda:0" if torch.cuda.is_available() else "cpu"
             self.config = self.__get_config()
+            self.current_speaker = current_speaker
             # Folders
             base_folder = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
             base_folder = os.path.join(base_folder, self.config['FOLDERS']['Main'], session_id, interview_id)
+            self.input_folder = os.path.join(base_folder, self.config['FOLDERS']['Input'])
             self.output_folder = os.path.join(base_folder, self.config['FOLDERS']['Output'])
             self.log_folder = os.path.join(self.output_folder, current_speaker, 'logs')
-            self.output_audio_folder = os.path.join(self.output_folder, current_speaker, 'audio_parts')
 
             # Create loggers
             self.log = self.__init_logs()
             self.log.propagate = False
 
-            (self.ate_model,
-             self.ate_feature_extractor,
-             self.ate_sampling_rate) = self.__init_models()
+            (self.vte_model,
+             self.vte_processor) = self.__init_models()
 
             self.__initialized = True
 
     def __init_logs(self) -> logging.Logger:
-        logger = logging.getLogger('audio')
+        logger = logging.getLogger('video')
         logger.setLevel(logging.NOTSET)
 
         if not os.path.exists(self.log_folder):
@@ -54,16 +54,16 @@ class Utils:
         encoding = 'utf-8'
 
         # Create a file handler for INFO messages
-        info_audio_log = os.path.join(self.log_folder, 'logAudio_{}'.
+        info_video_log = os.path.join(self.log_folder, 'logVideo_{}'.
                                       format(datetime.now().strftime('%Y_%m_%d_%H.%M.%S')))
-        info_audio_handler = logging.FileHandler(info_audio_log)
-        info_audio_handler.setLevel(logging.INFO)
-        info_audio_handler.setFormatter(logging.Formatter(formatter))
+        info_video_handler = logging.FileHandler(info_video_log)
+        info_video_handler.setLevel(logging.INFO)
+        info_video_handler.setFormatter(logging.Formatter(formatter))
 
         logger.handlers.clear()
 
         # Add the handlers to the root logger
-        logger.addHandler(info_audio_handler)
+        logger.addHandler(info_video_handler)
         logger.datefmt = date_format
         logger.encoding = encoding
         return logger
@@ -73,23 +73,21 @@ class Utils:
         if len(config.sections()) == 0:
             try:
                 base_path = os.path.dirname(os.path.dirname(__file__))
-                path = os.path.join(base_path, 'config', 'audioConfig.ini')
+                path = os.path.join(base_path, 'config', 'videoConfig.ini')
                 with open(path) as f:
                     config.read_file(f)
             except IOError:
-                print("No file 'audioConfig.ini' is present, the program can not continue")
+                print("No file 'videoConfig.ini' is present, the program can not continue")
                 sys.exit()
         return config
 
     def __init_models(self) -> tuple:
-        # Audio to emotions
-        ate_model_id = self.config['AUDIOEMOTIONS']['ModelId']
-        ate_model = AutoModelForAudioClassification.from_pretrained(ate_model_id)
-        ate_model.to(self.device)
-        ate_feature_extractor = Wav2Vec2FeatureExtractor.from_pretrained(ate_model_id)
-        ate_sampling_rate = ate_feature_extractor.sampling_rate
-        self.log.info('Audio-to-emotions model {} loaded in {}'.format(ate_model_id, self.device))
+        # Video to emotions
+        vte_model_id = self.config['VIDEOEMOTION']['ModelId']
+        vte_model = AutoModelForImageClassification.from_pretrained(vte_model_id, output_attentions=True)
+        vte_model.to(self.device)
+        vte_processor = AutoImageProcessor.from_pretrained(vte_model_id, output_attentions=True)
+        self.log.info('Video-to-emotions model {} loaded in {}'.format(vte_model_id, self.device))
 
-        return (ate_model,
-                ate_feature_extractor,
-                ate_sampling_rate)
+        return (vte_model,
+                vte_processor)
