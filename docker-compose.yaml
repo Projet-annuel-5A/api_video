@@ -3,11 +3,15 @@ services:
     build: "./middleware"
     ports:
       - "8000:8000"
-  dialogue:
-    build: "./dialogue"
+  audio:
+    build: "model_audio"
     ports:
       - "8001:8001"
-  vision:
-    build: "./vision"
+  text:
+    build: "model_text"
     ports:
       - "8002:8002"
+  video:
+    build: "model_video"
+    ports:
+      - "8003:8003"
