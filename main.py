@@ -101,12 +101,6 @@ def __split_audio(_audiofile: str, _speakers: dict) -> None:
     utils.log.info('Split audio finished')
 
 
-def __split_video_parts_old(_speakers: dict) -> None:
-    vpp = VideoProcess()
-
-    vpp.split_video_old(_speakers)
-
-
 def __merge_results(evaluations: pd.DataFrame,
                     text_results: pd.DataFrame,
                     video_results: pd.DataFrame,
