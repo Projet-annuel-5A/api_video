@@ -2,16 +2,17 @@ import time
 import threading
 import pandas as pd
 from tqdm import tqdm
+from typing import Dict
 from queue import Queue
 from fastapi import FastAPI
 from moviepy.editor import *
 from middleware.utils.utils import Utils
+from model_text.textEmotions import TextEmotions
 from middleware.utils.diarizator import Diarizator
 from middleware.utils.audioSplit import AudioSplit
-from middleware.utils.speechToText import SpeechToText
-from model_text.textEmotions import TextEmotions
 from model_audio.audioEmotions import AudioEmotions
 from model_video.videoEmotions import VideoEmotions
+from middleware.utils.speechToText import SpeechToText
 
 app = FastAPI()
 
@@ -74,7 +75,7 @@ def __analyze_text(queue: Queue) -> None:
     queue.put(('emotions_from_text', results))
 
 
-def __analyse_video(_speakers: dict, queue: Queue) -> None:
+def __analyse_video(_speakers: Dict, queue: Queue) -> None:
     results = pd.DataFrame(columns=['speaker', 'file', 'video_emotions'])
 
     files, emotions = vte.process_folder(_speakers)
@@ -103,7 +104,7 @@ def __analyse_audio(queue: Queue) -> None:
     queue.put(('emotions_from_audio', results))
 
 
-def __split_audio(_audiofile: str, _speakers: dict) -> None:
+def __split_audio(_audiofile: str, _speakers: Dict) -> None:
     utils.log.info('Starting split audio')
 
     asp.process(_audiofile, _speakers)

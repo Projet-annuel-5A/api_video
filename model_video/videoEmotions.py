@@ -4,13 +4,14 @@ import torch
 import numpy as np
 import torch.nn as nn
 from .utils.utils import Utils
+from typing import List, Dict, Tuple
 
 
 class VideoEmotions:
     def __init__(self, session_id: str, interview_id: str, current_speaker: str) -> None:
         self.utils = Utils(session_id, interview_id, current_speaker)
 
-    def __predict(self, image: np.ndarray) -> dict[str, float]:
+    def __predict(self, image: np.ndarray) -> Dict[str, float]:
         inputs = self.utils.vte_processor(image, return_tensors="pt")
         vte_model = self.utils.vte_model(**inputs)
         logits = vte_model.logits
@@ -34,7 +35,7 @@ class VideoEmotions:
 
         return sorted_values
 
-    def process_folder(self, _speakers: dict) -> tuple[list[str], list[dict[str, dict[str, float]]]]:
+    def process_folder(self, _speakers: Dict) -> Tuple[List[str], List[Dict[str, Dict[str, float]]]]:
         all_files = list()
         all_emotions = list()
 

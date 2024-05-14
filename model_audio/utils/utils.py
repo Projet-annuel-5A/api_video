@@ -4,6 +4,7 @@ import torch
 import logging
 import warnings
 import configparser
+from typing import Tuple
 from datetime import datetime
 warnings.filterwarnings("ignore", category=UserWarning)
 from transformers import (AutoModelForAudioClassification,
@@ -81,7 +82,7 @@ class Utils:
                 sys.exit()
         return config
 
-    def __init_models(self) -> tuple:
+    def __init_models(self) -> Tuple:
         # Audio to emotions
         ate_model_id = self.config['AUDIOEMOTIONS']['ModelId']
         ate_model = AutoModelForAudioClassification.from_pretrained(ate_model_id)

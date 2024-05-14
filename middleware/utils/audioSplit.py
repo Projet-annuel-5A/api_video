@@ -1,6 +1,7 @@
 import os
 import pandas as pd
 from .utils import Utils
+from typing import List, Dict
 from pydub import AudioSegment
 
 
@@ -25,7 +26,7 @@ class AudioSplit:
                                             'part_{:05d}.wav'.format(i)), format="wav")
         self.utils.log.info('End splitting {} for {}'.format(audiofile, self.utils.current_speaker))
 
-    def process(self, filename: str, speakers: dict) -> None:
+    def process(self, filename: str, speakers: Dict) -> None:
         self.utils.log.info('Start splitting {}'.format(filename))
 
         for speaker, df in zip(speakers.keys(), speakers.values()):

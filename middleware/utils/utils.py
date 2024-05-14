@@ -6,10 +6,12 @@ import logging
 import warnings
 import configparser
 from datetime import datetime
+from typing import Tuple, Any
+from dotenv import load_dotenv
+from supabase import create_client, Client
 warnings.filterwarnings("ignore", category=UserWarning)
 from pyannote.audio import Pipeline as AudioPipeline
-from transformers import (AutoModelForSpeechSeq2Seq,
-                          AutoProcessor)
+from transformers import (AutoModelForSpeechSeq2Seq, AutoProcessor)
 
 
 # Create custom stream handler
@@ -55,7 +57,7 @@ class Utils:
 
     def __init__(self, session_id: str = None, interview_id: str = None, current_speaker: str = None) -> None:
         if not self.__initialized:
-
+            load_dotenv()
             self.config = self.__get_config()
             self.device = "cuda:0" if torch.cuda.is_available() else "cpu"
             self.current_speaker = current_speaker
@@ -75,7 +77,12 @@ class Utils:
             self.log.propagate = False
             sys.stderr = LoggerWriter(self.log, logging.ERROR)
 
+            self.supabase_client = self.__check_supabase_connection()
+            self.supabase_connection = self.__connect_to_bucket()
+
             self.check_dirs()
+
+            self.__download_input_file(session_id, interview_id)
 
             (self.diarization_pipeline,
              self.stt_model,
@@ -136,7 +143,7 @@ class Utils:
                 sys.exit()
         return config
 
-    def __init_models(self) -> tuple:
+    def __init_models(self) -> Tuple:
         # Diarization
         diarization_model_id = self.config['DIARIZATION']['ModelId']
         diarization_pipeline = AudioPipeline.from_pretrained(diarization_model_id,
@@ -154,15 +161,7 @@ class Utils:
                 stt_processor)
 
     def check_dirs(self) -> None:
-        if not os.path.exists(self.input_folder):
-            message = "The folder '{}' does not exist, the program can not continue".format(self.input_folder)
-            print(message)
-            self.log.error(message)
-            self.end_logs()
-            sys.exit()
-        else:
-            self.log.info("The directory '{}' exists".format(self.input_folder))
-
+        self.__create_folder(self.input_folder)
         self.__create_folder(self.output_folder)
         self.__create_folder(self.output_audio_folder)
         self.__create_folder(self.output_results_folder)
@@ -177,3 +176,43 @@ class Utils:
         for handler in log_handlers:
             handler.flush()
             logging.getLogger().removeHandler(handler)
+
+    def __check_supabase_connection(self) -> Client:
+        try:
+            client = create_client(self.config['SUPABASE']['Url'], os.environ.get('SUPABASE_KEY'))
+        except Exception as e:
+            message = ('Error connecting to Supabase, the program can not continue. {}'.
+                       format(e.args[0]['message']))
+            self.log.error(message)
+            print(e)
+            sys.exit(1)
+        return client
+
+    def __connect_to_bucket(self) -> Any:
+        bucket_name = self.config['SUPABASE']['InputBucket']
+        connection = self.supabase_client.storage.from_(bucket_name)
+        try:
+            connection.list()
+            self.log.info('Connection to S3 bucket {} successful'.format(bucket_name))
+        except Exception as e:
+            message = ('Error connecting to S3 bucket {}, the program can not continue. {}'.
+                       format(bucket_name, e.args[0]['message']))
+            self.log.error(message)
+            print(message)
+            sys.exit(1)
+        return connection
+
+    def __download_input_file(self, session_id: str, interview_id: str) -> None:
+        videoname = self.config['GENERAL']['Filename']
+        s3_path = '{}/{}/raw/{}'.format(session_id, interview_id, videoname)
+        try:
+            with open(os.path.join(self.input_folder, videoname), 'wb+') as f:
+                res = self.supabase_connection.download(s3_path)
+                f.write(res)
+            self.log.info('The file {} has been downloaded from the S3 bucket'.format(videoname))
+        except Exception as e:
+            message = ('Error downloading the file {} from the S3 bucket: {}'.
+                       format(videoname, e.args[0]['message']))
+            self.log.error(message)
+            print(message)
+            sys.exit(1)

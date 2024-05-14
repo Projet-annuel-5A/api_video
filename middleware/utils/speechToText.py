@@ -1,6 +1,7 @@
 import os
 import torchaudio
 from .utils import Utils
+from typing import List, Tuple
 
 
 class SpeechToText:
@@ -27,7 +28,7 @@ class SpeechToText:
 
         return transcription[0].strip()
 
-    def process_folder(self, lang: str = 'french') -> tuple[list[str], list[str]]:
+    def process_folder(self, lang: str = 'french') -> Tuple[List[str], List[str]]:
         all_files = []
         all_texts = []
 

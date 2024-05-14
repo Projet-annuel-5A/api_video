@@ -1,4 +1,5 @@
 import torch
+from typing import List, Dict
 from .utils.utils import Utils
 
 
@@ -6,7 +7,7 @@ class TextEmotions:
     def __init__(self, session_id: str, interview_id: str, current_speaker: str) -> None:
         self.utils = Utils(session_id, interview_id, current_speaker)
 
-    def process_texts(self, all_texts: list[str]) -> list[dict[str, float]]:
+    def process_texts(self, all_texts: List[str]) -> List[Dict[str, float]]:
         self.utils.log.info('Start processing emotions from {} texts'.format(len(all_texts)))
 
         all_emotions = []

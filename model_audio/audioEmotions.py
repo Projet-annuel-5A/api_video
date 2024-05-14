@@ -4,6 +4,7 @@ import torchaudio
 import numpy as np
 from .utils.utils import Utils
 import torch.nn.functional as f
+from typing import Dict, List, Tuple
 
 
 class AudioEmotions:
@@ -17,7 +18,7 @@ class AudioEmotions:
 
         return speech
 
-    def __predict(self, filename: str, path: str) -> dict[str, float]:
+    def __predict(self, filename: str, path: str) -> Dict[str, float]:
         self.utils.log.info('Recognizing emotions from audio file {}'.format(filename))
 
         speech = self.__speech_file_to_array_fn(path, self.utils.ate_sampling_rate)
@@ -41,7 +42,7 @@ class AudioEmotions:
 
         return sorted_values
 
-    def process_folder(self) -> tuple[list, list]:
+    def process_folder(self) -> Tuple[List, List]:
         all_files = list()
         all_emotions = list()
 

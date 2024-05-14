@@ -4,6 +4,7 @@ import torch
 import logging
 import warnings
 import configparser
+from typing import Tuple
 from datetime import datetime
 warnings.filterwarnings("ignore", category=UserWarning)
 from transformers import (AutoImageProcessor,
@@ -81,7 +82,7 @@ class Utils:
                 sys.exit()
         return config
 
-    def __init_models(self) -> tuple:
+    def __init_models(self) -> Tuple:
         # Video to emotions
         vte_model_id = self.config['VIDEOEMOTION']['ModelId']
         vte_model = AutoModelForImageClassification.from_pretrained(vte_model_id, output_attentions=True)

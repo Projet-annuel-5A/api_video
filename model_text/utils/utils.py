@@ -4,6 +4,7 @@ import torch
 import logging
 import warnings
 import configparser
+from typing import Tuple
 from datetime import datetime
 warnings.filterwarnings("ignore", category=UserWarning)
 from transformers import (AutoTokenizer,
@@ -78,7 +79,7 @@ class Utils:
                 sys.exit()
         return config
 
-    def __init_models(self) -> tuple:
+    def __init_models(self) -> Tuple:
         # Text to emotions
         tte_model_id = self.config['TEXTEMOTIONS']['ModelId']
         tte_tokenizer = AutoTokenizer.from_pretrained(tte_model_id)

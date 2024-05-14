@@ -3,6 +3,7 @@ import torch
 import torchaudio
 import pandas as pd
 from .utils import Utils
+from typing import Dict, Tuple
 from pyannote.core.annotation import Annotation
 
 
@@ -10,12 +11,12 @@ class Diarizator:
     def __init__(self) -> None:
         self.utils = Utils()
 
-    def __read_audio(self, filename: str) -> tuple[torch.Tensor, int]:
+    def __read_audio(self, filename: str) -> Tuple[torch.Tensor, int]:
         waveform, sample_rate = torchaudio.load(filename)
         self.utils.log.info('File {} opened'.format(filename))
         return waveform, sample_rate
 
-    def __split_diarization(self, diarization: Annotation, num_speakers: int) -> dict[str, pd.DataFrame]:
+    def __split_diarization(self, diarization: Annotation, num_speakers: int) -> Dict[str, pd.DataFrame]:
         self.utils.log.info('Start splitting diarization')
 
         speakers_dict = {}
@@ -66,7 +67,7 @@ class Diarizator:
         self.utils.log.info('Diarization completed successfully')
         return diarization
 
-    def process(self, filename: str) -> dict[str, pd.DataFrame]:
+    def process(self, filename: str) -> Dict[str, pd.DataFrame]:
         self.utils.log.info('Start diarization over {}'.format(filename))
         diarization = self.__diarize(filename)
         self.utils.log.info(diarization)
