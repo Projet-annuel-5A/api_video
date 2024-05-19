@@ -4,11 +4,30 @@ import torch
 import logging
 import warnings
 import configparser
-from typing import Tuple
+from typing import Tuple, Any
 from datetime import datetime
+from dotenv import load_dotenv
+from supabase import create_client, Client
 warnings.filterwarnings("ignore", category=UserWarning)
 from transformers import (AutoModelForAudioClassification,
                           Wav2Vec2FeatureExtractor)
+
+
+class BufferingHandler(logging.Handler):
+    def __init__(self, filename: str) -> None:
+        super().__init__()
+        self.buffer = []
+        self.filename = filename
+
+    def emit(self, record: logging.LogRecord) -> None:
+        # Append the log record to the buffer
+        self.buffer.append(self.format(record))
+
+    def flush(self) -> str:
+        if len(self.buffer) > 0:
+            return '\n'.join(self.buffer)
+        else:
+            return ''
 
 
 class Utils:
@@ -22,19 +41,23 @@ class Utils:
 
     def __init__(self, session_id: str, interview_id: str, current_speaker: str) -> None:
         if not self.__initialized:
-
-            self.device = "cuda:0" if torch.cuda.is_available() else "cpu"
+            load_dotenv()
             self.config = self.__get_config()
-            # Folders
-            base_folder = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
-            base_folder = os.path.join(base_folder, self.config['FOLDERS']['Main'], session_id, interview_id)
-            self.output_folder = os.path.join(base_folder, self.config['FOLDERS']['Output'])
-            self.log_folder = os.path.join(self.output_folder, current_speaker, 'logs')
-            self.output_audio_folder = os.path.join(self.output_folder, current_speaker, 'audio_parts')
+
+            self.session_id = session_id
+            self.interview_id = interview_id
+            self.current_speaker = current_speaker
+            self.device = "cuda:0" if torch.cuda.is_available() else "cpu"
+
+            # S3 Folders
+            self.output_s3_folder = '{}/{}/output'.format(self.session_id, self.interview_id)
 
             # Create loggers
             self.log = self.__init_logs()
             self.log.propagate = False
+
+            self.supabase_client = self.__check_supabase_connection()
+            self.supabase_connection = self.__connect_to_bucket()
 
             (self.ate_model,
              self.ate_feature_extractor,
@@ -43,30 +66,19 @@ class Utils:
             self.__initialized = True
 
     def __init_logs(self) -> logging.Logger:
-        logger = logging.getLogger('audio')
-        logger.setLevel(logging.NOTSET)
-
-        if not os.path.exists(self.log_folder):
-            os.makedirs(self.log_folder)
-
-        # Configure basic logging settings
-        formatter = '[%(asctime)s] %(levelname)s [%(name)s.%(funcName)s:%(lineno)d] %(message)s'
-        date_format = '%d/%b/%Y %H:%M:%S'
-        encoding = 'utf-8'
+        logger = logging.getLogger('audioLog')
+        logger.setLevel(logging.INFO)
 
         # Create a file handler for INFO messages
-        info_audio_log = os.path.join(self.log_folder, 'logAudio_{}'.
-                                      format(datetime.now().strftime('%Y_%m_%d_%H.%M.%S')))
-        info_audio_handler = logging.FileHandler(info_audio_log)
-        info_audio_handler.setLevel(logging.INFO)
-        info_audio_handler.setFormatter(logging.Formatter(formatter))
-
-        logger.handlers.clear()
+        handler = BufferingHandler('audioLog_{}'.format(datetime.now().strftime('%Y_%m_%d_%H.%M.%S')))
+        handler.setLevel(logging.INFO)
+        handler.setFormatter(logging.Formatter(
+            '[%(asctime)s] %(levelname)s [%(name)s.%(funcName)s:%(lineno)d] %(message)s'))
 
         # Add the handlers to the root logger
-        logger.addHandler(info_audio_handler)
-        logger.datefmt = date_format
-        logger.encoding = encoding
+        logger.addHandler(handler)
+        logger.datefmt = '%d/%b/%Y %H:%M:%S'
+        logger.encoding = 'utf-8'
         return logger
 
     def __get_config(self) -> configparser.ConfigParser:
@@ -94,3 +106,57 @@ class Utils:
         return (ate_model,
                 ate_feature_extractor,
                 ate_sampling_rate)
+
+    def __check_supabase_connection(self) -> Client:
+        try:
+            client = create_client(self.config['SUPABASE']['Url'], os.environ.get('SUPABASE_KEY'))
+        except Exception as e:
+            message = ('Error connecting to Supabase, the program can not continue. {}'.
+                       format(e.args[0]['message']))
+            self.log.error(message)
+            print(message)
+            sys.exit(1)
+        return client
+
+    def __connect_to_bucket(self) -> Any:
+        bucket_name = self.config['SUPABASE']['InputBucket']
+        connection = self.supabase_client.storage.from_(bucket_name)
+        try:
+            connection.list()
+            self.log.info('Connection to S3 bucket {} successful'.format(bucket_name))
+        except Exception as e:
+            message = ('Error connecting to S3 bucket {}, the program can not continue. {}'.
+                       format(bucket_name, e.args[0]['message']))
+            self.log.error(message)
+            print(message)
+            sys.exit(1)
+        return connection
+
+    def save_to_s3(self, filename: str, content: bytes, file_format: str, s3_subfolder: str = None) -> bool:
+        match file_format:
+            case 'audio': content_type = 'audio/mpeg'
+            case 'video': content_type = 'video/mp4'
+            case 'text': content_type = 'text/plain'
+            case _: content_type = 'text/plain'
+
+        try:
+            s3_path = '{}/{}/{}'.format(self.output_s3_folder,
+                                        s3_subfolder,
+                                        filename) if s3_subfolder else '{}/{}'.format(self.output_s3_folder, filename)
+            self.supabase_connection.upload(file=content, path=s3_path, file_options={"content-type": content_type})
+            self.log.info('File {} uploaded to S3 bucket at {}'.format(filename, s3_path))
+            return True
+        except Exception as e:
+            message = ('Error uploading the file {} to the S3 bucket: {}'.
+                       format(filename, e.args[0]['message']))
+            self.log.error(message)
+            return False
+
+    def end_logs(self) -> None:
+        log_handlers = logging.getLogger('audioLog').handlers[:]
+        for handler in log_handlers:
+            if isinstance(handler, BufferingHandler):
+                log = handler.flush()
+                if log:
+                    self.save_to_s3('{}.log'.format(handler.filename), log.encode(), 'text', 'logs')
+            logging.getLogger().removeHandler(handler)

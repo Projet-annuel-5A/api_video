@@ -1,17 +1,18 @@
 import os
 import sys
 import torch
-import shutil
 import logging
 import warnings
+import numpy as np
 import configparser
 from datetime import datetime
-from typing import Tuple, Any
 from dotenv import load_dotenv
+from pydub import AudioSegment
+from typing import Tuple, Any, List
 from supabase import create_client, Client
 warnings.filterwarnings("ignore", category=UserWarning)
 from pyannote.audio import Pipeline as AudioPipeline
-from transformers import (AutoModelForSpeechSeq2Seq, AutoProcessor)
+from transformers import AutoModelForSpeechSeq2Seq, AutoProcessor
 
 
 # Create custom stream handler
@@ -38,12 +39,14 @@ class BufferingHandler(logging.Handler):
         # Append the log record to the buffer
         self.buffer.append(self.format(record))
 
-    def flush(self) -> None:
-        # Write the buffered log messages to the desired output
+    def flush(self) -> str:
         if len(self.buffer) > 0:
-            with open(self.filename, 'w') as f:
-                for message in self.buffer:
-                    f.write(message + '\n')
+            return '\n'.join(self.buffer)
+        else:
+            return ''
+            # with open(self.filename, 'w') as f:
+            #    for message in self.buffer:
+            #        f.write(message + '\n')
 
 
 class Utils:
@@ -59,18 +62,14 @@ class Utils:
         if not self.__initialized:
             load_dotenv()
             self.config = self.__get_config()
-            self.device = "cuda:0" if torch.cuda.is_available() else "cpu"
-            self.current_speaker = current_speaker
 
-            # Folders
-            base_folder = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
-            base_folder = os.path.join(base_folder, self.config['FOLDERS']['Main'], session_id, interview_id)
-            self.input_folder = os.path.join(base_folder, self.config['FOLDERS']['Input'])
-            self.output_folder = os.path.join(base_folder, self.config['FOLDERS']['Output'])
-            self.log_folder = os.path.join(self.output_folder, current_speaker, 'logs')
-            self.temp_folder = os.path.join(self.output_folder, current_speaker, 'temp')
-            self.output_audio_folder = os.path.join(self.output_folder, current_speaker, 'audio_parts')
-            self.output_results_folder = os.path.join(self.output_folder, current_speaker, 'results')
+            self.session_id = session_id
+            self.interview_id = interview_id
+            self.current_speaker = current_speaker
+            self.device = "cuda:0" if torch.cuda.is_available() else "cpu"
+
+            # S3 Folders
+            self.output_s3_folder = '{}/{}/output'.format(self.session_id, self.interview_id)
 
             # Create loggers
             self.log = self.__init_logs()
@@ -80,29 +79,15 @@ class Utils:
             self.supabase_client = self.__check_supabase_connection()
             self.supabase_connection = self.__connect_to_bucket()
 
-            self.check_dirs()
-
-            self.__download_input_file(session_id, interview_id)
-
             (self.diarization_pipeline,
              self.stt_model,
              self.stt_processor) = self.__init_models()
 
             self.__initialized = True
 
-    def __create_folder(self, path: str) -> None:
-        if not os.path.exists(path):
-            os.makedirs(path)
-            self.log.info("The directory {} has been created".format(path))
-        else:
-            self.log.info("The directory {} exists".format(path))
-
     def __init_logs(self) -> logging.Logger:
-        root_logger = logging.getLogger()
+        root_logger = logging.getLogger('mainLog')
         root_logger.setLevel(logging.NOTSET)
-
-        if not os.path.exists(self.log_folder):
-            os.makedirs(self.log_folder)
 
         # Configure basic logging settings
         formatter = logging.Formatter('[%(asctime)s] %(levelname)s [%(name)s.%(funcName)s:%(lineno)d] %(message)s')
@@ -110,13 +95,13 @@ class Utils:
         encoding = 'utf-8'
 
         # Create a file handler for INFO messages
-        info_log = os.path.join(self.log_folder, 'log_{}'.format(datetime.now().strftime('%Y_%m_%d_%H.%M.%S')))
+        info_log = 'log_{}'.format(datetime.now().strftime('%Y_%m_%d_%H.%M.%S'))
         info_handler = BufferingHandler(info_log)
         info_handler.setLevel(logging.INFO)
         info_handler.setFormatter(formatter)
 
         # Create a file handler for ERROR messages
-        error_log = os.path.join(self.log_folder, 'errorLog_{}'.format(datetime.now().strftime('%Y_%m_%d_%H.%M.%S')))
+        error_log = 'errorLog_{}'.format(datetime.now().strftime('%Y_%m_%d_%H.%M.%S'))
         error_handler = BufferingHandler(error_log)
         error_handler.setLevel(logging.ERROR)
         error_handler.setFormatter(formatter)
@@ -160,23 +145,19 @@ class Utils:
                 stt_model,
                 stt_processor)
 
-    def check_dirs(self) -> None:
-        self.__create_folder(self.input_folder)
-        self.__create_folder(self.output_folder)
-        self.__create_folder(self.output_audio_folder)
-        self.__create_folder(self.output_results_folder)
-        self.__create_folder(self.temp_folder)
-
-    def delete_temp_files(self) -> None:
-        shutil.rmtree(self.temp_folder)
-        self.log.info('Temporary files deleted')
-        shutil.rmtree(self.input_folder)
-        self.log.info('Input folder deleted')
+    def delete_temp_files(self, files: List[str]) -> None:
+        for file in files:
+            if os.path.exists(file):
+                os.remove(file)
+        # shutil.rmtree(self.temp_folder)
 
     def end_logs(self) -> None:
-        log_handlers = logging.getLogger().handlers[:]
+        log_handlers = logging.getLogger('mainLog').handlers[:]
         for handler in log_handlers:
-            handler.flush()
+            if isinstance(handler, BufferingHandler):
+                log = handler.flush()
+                if log:
+                    self.save_to_s3('{}.log'.format(handler.filename), log.encode(), 'text', 'logs')
             logging.getLogger().removeHandler(handler)
 
     def __check_supabase_connection(self) -> Client:
@@ -186,7 +167,7 @@ class Utils:
             message = ('Error connecting to Supabase, the program can not continue. {}'.
                        format(e.args[0]['message']))
             self.log.error(message)
-            print(e)
+            print(message)
             sys.exit(1)
         return client
 
@@ -204,17 +185,78 @@ class Utils:
             sys.exit(1)
         return connection
 
-    def __download_input_file(self, session_id: str, interview_id: str) -> None:
-        videoname = self.config['GENERAL']['Filename']
-        s3_path = '{}/{}/raw/{}'.format(session_id, interview_id, videoname)
+    def save_to_s3(self, filename: str, content: Any, file_format: str, s3_subfolder: str = None) -> None:
+        match file_format:
+            case 'audio': content_type = 'audio/mpeg'
+            case 'video': content_type = 'video/mp4'
+            case 'text': content_type = 'text/plain'
+            case _: content_type = 'text/plain'
+
         try:
-            with open(os.path.join(self.input_folder, videoname), 'wb+') as f:
-                res = self.supabase_connection.download(s3_path)
-                f.write(res)
-            self.log.info('The file {} has been downloaded from the S3 bucket'.format(videoname))
+            s3_path = '{}/{}/{}'.format(self.output_s3_folder,
+                                        s3_subfolder,
+                                        filename) if s3_subfolder else '{}/{}'.format(self.output_s3_folder, filename)
+            self.supabase_connection.upload(file=content, path=s3_path, file_options={"content-type": content_type})
+            self.log.info('File {} uploaded to S3 bucket at {}'.format(filename, s3_path))
         except Exception as e:
-            message = ('Error downloading the file {} from the S3 bucket: {}'.
-                       format(videoname, e.args[0]['message']))
+            message = ('Error uploading the file {} to the S3 bucket: {}'.
+                       format(filename, e.args[0]['message']))
             self.log.error(message)
-            print(message)
-            sys.exit(1)
+
+    '''
+    def audiofileclip_to_tensor(self, audio_clip):
+        original_stdout = sys.stdout
+        original_stderr = sys.stderr
+        sys.stdout = open(os.devnull, 'w')
+        sys.stderr = open(os.devnull, 'w')
+
+        with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as temp_file:
+            temp_file_path = temp_file.name
+
+            try:
+                # Export the AudioFileClip to the temporary file
+                audio_clip.write_audiofile(temp_file_path, codec='pcm_s16le')
+
+                # Read the temporary file with torchaudio
+                waveform, sample_rate = torchaudio.load(temp_file_path)
+
+            finally:
+                # Clean up the temporary file
+                if os.path.exists(temp_file_path):
+                    os.remove(temp_file_path)
+
+        sys.stdout = original_stdout
+        sys.stderr = original_stderr
+
+        return waveform, sample_rate
+    '''
+
+    def audiosegment_to_tensor(self, audio_segment: AudioSegment) -> torch.Tensor:
+        original_stdout = sys.stdout
+        original_stderr = sys.stderr
+        sys.stdout = open(os.devnull, 'w')
+        sys.stderr = open(os.devnull, 'w')
+
+        # Extract raw audio data
+        raw_data = np.array(audio_segment.get_array_of_samples())
+
+        # Convert to NumPy array
+        if audio_segment.channels == 2:  # Stereo audio
+            raw_data = raw_data.reshape((-1, 2)).T.astype(np.float32)
+        else:  # Mono audio
+            raw_data = raw_data.astype(np.float32)
+
+        # Normalize the audio data (optional)
+        # Convert the raw data to range [-1, 1]
+        if audio_segment.sample_width == 2:  # 16-bit audio
+            raw_data /= 32768.0
+        elif audio_segment.sample_width == 4:  # 32-bit audio
+            raw_data /= 2147483648.0
+
+        # Convert to Torch Tensor
+        audio_tensor = torch.from_numpy(raw_data)
+
+        sys.stdout = original_stdout
+        sys.stderr = original_stderr
+
+        return audio_tensor

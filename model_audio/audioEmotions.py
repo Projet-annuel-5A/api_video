@@ -1,5 +1,6 @@
 import os
 import torch
+import tempfile
 import torchaudio
 import numpy as np
 from .utils.utils import Utils
@@ -46,11 +47,24 @@ class AudioEmotions:
         all_files = list()
         all_emotions = list()
 
-        for file in os.listdir(self.utils.output_audio_folder):
-            if file.split('.')[-1] == 'wav':
-                file_path = os.path.join(self.utils.output_audio_folder, file)
-                emotions = self.__predict(file, file_path)
-                all_emotions.append(emotions)
-                all_files.append(file.split('.')[0])
+        s3_path = '{}/{}/audioparts'.format(self.utils.output_s3_folder, self.utils.current_speaker)
+        for file in self.utils.supabase_connection.list(s3_path):
+            filename = file['name']
+            if filename.split('.')[-1] == 'wav':
+                downloaded_file = self.utils.supabase_connection.download('{}/{}'.format(s3_path, filename))
+                with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as temp_file:
+                    temp_file_path = temp_file.name
+
+                    try:
+                        temp_file.write(downloaded_file)
+                        emotions = self.__predict(file, temp_file_path)
+                    finally:
+                        temp_file.close()
+                        # Clean up the temporary file
+                        if os.path.exists(temp_file_path):
+                            os.remove(temp_file_path)
+
+            all_emotions.append(emotions)
+            all_files.append(filename.split('.')[0])
 
         return all_files, all_emotions
