@@ -11,6 +11,10 @@ from fastapi import FastAPI, HTTPException
 app = FastAPI()
 
 
+class InputModel(BaseModel):
+    speakers: str
+
+
 class OutputModel(BaseModel):
     all_files: List[str]
     all_emotions: str
@@ -36,13 +40,23 @@ def health():
 
 
 @app.post("/analyse_video", response_model=OutputModel)
-async def process_video(speakers: str):
+async def process_video(speakers: InputModel):
     try:
-        all_speakers = json.loads(speakers)
+        all_speakers = json.loads(speakers['speakers'])
         all_files, all_emotions = vte.process_folder(all_speakers)
         return {"all_files": all_files, "all_emotions": json.dumps(all_emotions)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
+@app.get("/end_video_log")
+async def end_video_log():
+    try:
+        vte.utils.end_log()
+        return {"status": "ok"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 if __name__ == "__main__":
-    uvicorn.run(app, host="127.0.0.1", port=8009, reload=True)
+    uvicorn.run(app, host="127.0.0.1", port=8003, reload=True)

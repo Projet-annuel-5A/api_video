@@ -13,7 +13,6 @@ from pydub import AudioSegment
 from typing import Tuple, Any, List
 from moviepy.editor import VideoFileClip
 from supabase import create_client, Client
-
 warnings.filterwarnings("ignore", category=UserWarning)
 from pyannote.audio import Pipeline as AudioPipeline
 from transformers import AutoModelForSpeechSeq2Seq, AutoProcessor

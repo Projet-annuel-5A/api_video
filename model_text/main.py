@@ -46,5 +46,14 @@ async def process_text(texts: InputItem):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/end_text_log")
+async def end_text_log():
+    try:
+        tte.utils.end_log()
+        return {"status": "ok"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 if __name__ == "__main__":
-    uvicorn.run(app, host="127.0.0.1", port=8001, reload=True)
+    uvicorn.run(app, host="127.0.0.1", port=8002, reload=True)

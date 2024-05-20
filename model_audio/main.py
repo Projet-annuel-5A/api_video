@@ -34,7 +34,7 @@ def health():
     return {"status": "ok"}
 
 
-@app.post("/analyse_audio", response_model=OutputModel)
+@app.get("/analyse_audio", response_model=OutputModel)
 async def process_audio():
     try:
         all_files, all_emotions = ate.process_folder()
@@ -47,5 +47,14 @@ async def process_audio():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/end_audio_log")
+async def end_audio_log():
+    try:
+        ate.utils.end_log()
+        return {"status": "ok"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 if __name__ == "__main__":
-    uvicorn.run(app, host="127.0.0.1", port=8000, reload=True)
+    uvicorn.run(app, host="127.0.0.1", port=8001, reload=True)
