@@ -3,7 +3,7 @@ import torch
 import tempfile
 import torchaudio
 import numpy as np
-from .utils.utils import Utils
+from utils.utils import Utils
 import torch.nn.functional as f
 from typing import Dict, List, Tuple
 

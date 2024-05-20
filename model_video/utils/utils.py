@@ -6,7 +6,6 @@ import warnings
 import configparser
 from typing import Tuple, Any
 from datetime import datetime
-from dotenv import load_dotenv
 from supabase import create_client, Client
 warnings.filterwarnings("ignore", category=UserWarning)
 from transformers import (AutoImageProcessor,
@@ -41,7 +40,6 @@ class Utils:
 
     def __init__(self, session_id: str, interview_id: str, current_speaker: str) -> None:
         if not self.__initialized:
-            load_dotenv()
             self.config = self.__get_config()
 
             self.session_id = session_id
@@ -108,8 +106,7 @@ class Utils:
         try:
             client = create_client(self.config['SUPABASE']['Url'], os.environ.get('SUPABASE_KEY'))
         except Exception as e:
-            message = ('Error connecting to Supabase, the program can not continue. {}'.
-                       format(e.args[0]['message']))
+            message = ('Error connecting to Supabase, the program can not continue.', str(e))
             self.log.error(message)
             print(message)
             sys.exit(1)
@@ -122,8 +119,8 @@ class Utils:
             connection.list()
             self.log.info('Connection to S3 bucket {} successful'.format(bucket_name))
         except Exception as e:
-            message = ('Error connecting to S3 bucket {}, the program can not continue. {}'.
-                       format(bucket_name, e.args[0]['message']))
+            message = ('Error connecting to S3 bucket {}, the program can not continue.'.
+                       format(bucket_name), str(e))
             self.log.error(message)
             print(message)
             sys.exit(1)
@@ -144,8 +141,8 @@ class Utils:
             self.log.info('File {} uploaded to S3 bucket at {}'.format(filename, s3_path))
             return True
         except Exception as e:
-            message = ('Error uploading the file {} to the S3 bucket: {}'.
-                       format(filename, e.args[0]['message']))
+            message = ('Error uploading the file {} to the S3 bucket.'.
+                       format(filename), str(e))
             self.log.error(message)
             return False
 
@@ -156,4 +153,4 @@ class Utils:
                 log = handler.flush()
                 if log:
                     self.save_to_s3('{}.log'.format(handler.filename), log.encode(), 'text', 'logs')
-            logging.getLogger().removeHandler(handler)
+            logging.getLogger('videoLog').removeHandler(handler)

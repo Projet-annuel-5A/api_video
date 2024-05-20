@@ -1,8 +1,7 @@
 import torch
-import pandas as pd
 from .utils import Utils
-from typing import Dict
 from pydub import AudioSegment
+from typing import Dict, List, Tuple
 from pyannote.core.annotation import Annotation
 
 
@@ -10,42 +9,32 @@ class Diarizator:
     def __init__(self) -> None:
         self.utils = Utils()
 
-    def __split_diarization(self, diarization: Annotation, num_speakers: int) -> Dict[str, pd.DataFrame]:
+    def __split_diarization(self, diarization: Annotation) -> Dict[str, List[Tuple[float, float]]]:
         self.utils.log.info('Start splitting diarization')
 
         speakers_dict = {}
-        start = 0
-        end = 0
         current_speaker = ''
-
-        for i in range(num_speakers):
-            speakers_dict['speaker_' + str('{:03d}'.format(i))] = pd.DataFrame(columns=['start', 'end'])
+        values = Tuple[float, float]
 
         for turn, _, speaker in diarization.itertracks(yield_label=True):
+            speaker = 'speaker_{:03d}'.format(int(speaker.split('_')[1]))
             if current_speaker == '':
-                start = turn.start
-                end = turn.end
                 current_speaker = speaker
+                values = (turn.start, turn.end)
+            elif speaker == current_speaker:
+                values = (values[0], turn.end)
             else:
-                if speaker == current_speaker:
-                    end = turn.end
-                else:
-                    key = 'speaker_{:03d}'.format(int(current_speaker.split('_')[1]))
-                    df = speakers_dict[key]
-                    df.loc[len(df)] = [start, end]
-                    speakers_dict[key] = df
+                if speakers_dict.get(current_speaker) is None:
+                    speakers_dict[current_speaker] = list()
+                speakers_dict[current_speaker].append(values)
+                current_speaker = speaker
+                values = (turn.start, turn.end)
 
-                    start = turn.start
-                    end = turn.end
-                    current_speaker = speaker
-
-        key = 'speaker_{:03d}'.format(int(current_speaker.split('_')[1]))
-        df = speakers_dict[key]
-        df.loc[len(df)] = [start, end]
-        speakers_dict[key] = df
+        if speakers_dict.get(current_speaker) is None:
+            speakers_dict[current_speaker] = list()
+        speakers_dict[current_speaker].append(values)
 
         self.utils.log.info('Split completed successfully')
-
         return speakers_dict
 
     '''
@@ -61,7 +50,7 @@ class Diarizator:
         self.utils.log.info('Diarization completed successfully')
         return diarization
 
-    def process(self, audio_file: AudioSegment, filename: str) -> Dict[str, pd.DataFrame]:
+    def process(self, audio_file: AudioSegment, filename: str) -> Dict[str, List[Tuple[float, float]]]:
         self.utils.log.info('Start diarization over audio file')
         # Convert the audio in Torch Tensor
         waveform = self.utils.audiosegment_to_tensor(audio_file)
@@ -70,6 +59,6 @@ class Diarizator:
         self.utils.log.info(diarization)
         diarization_str = diarization.to_rttm().encode()
         self.utils.save_to_s3('{}.rttm'.format(filename.split('.')[0]), diarization_str, 'text')
-        speakers = self.__split_diarization(diarization, 2)
+        speakers = self.__split_diarization(diarization)
         self.utils.log.info('File {} diarizated succesfully'.format(filename))
         return speakers

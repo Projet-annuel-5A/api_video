@@ -2,14 +2,18 @@ import os
 import sys
 import torch
 import logging
+import tempfile
 import warnings
 import numpy as np
 import configparser
+import pandas as pd
 from datetime import datetime
 from dotenv import load_dotenv
 from pydub import AudioSegment
 from typing import Tuple, Any, List
+from moviepy.editor import VideoFileClip
 from supabase import create_client, Client
+
 warnings.filterwarnings("ignore", category=UserWarning)
 from pyannote.audio import Pipeline as AudioPipeline
 from transformers import AutoModelForSpeechSeq2Seq, AutoProcessor
@@ -158,14 +162,13 @@ class Utils:
                 log = handler.flush()
                 if log:
                     self.save_to_s3('{}.log'.format(handler.filename), log.encode(), 'text', 'logs')
-            logging.getLogger().removeHandler(handler)
+            logging.getLogger('mainLog').removeHandler(handler)
 
     def __check_supabase_connection(self) -> Client:
         try:
             client = create_client(self.config['SUPABASE']['Url'], os.environ.get('SUPABASE_KEY'))
         except Exception as e:
-            message = ('Error connecting to Supabase, the program can not continue. {}'.
-                       format(e.args[0]['message']))
+            message = ('Error connecting to Supabase, the program can not continue.', str(e))
             self.log.error(message)
             print(message)
             sys.exit(1)
@@ -178,8 +181,8 @@ class Utils:
             connection.list()
             self.log.info('Connection to S3 bucket {} successful'.format(bucket_name))
         except Exception as e:
-            message = ('Error connecting to S3 bucket {}, the program can not continue. {}'.
-                       format(bucket_name, e.args[0]['message']))
+            message = ('Error connecting to S3 bucket {}, the program can not continue.'.
+                       format(bucket_name), str(e))
             self.log.error(message)
             print(message)
             sys.exit(1)
@@ -187,10 +190,14 @@ class Utils:
 
     def save_to_s3(self, filename: str, content: Any, file_format: str, s3_subfolder: str = None) -> None:
         match file_format:
-            case 'audio': content_type = 'audio/mpeg'
-            case 'video': content_type = 'video/mp4'
-            case 'text': content_type = 'text/plain'
-            case _: content_type = 'text/plain'
+            case 'audio':
+                content_type = 'audio/mpeg'
+            case 'video':
+                content_type = 'video/mp4'
+            case 'text':
+                content_type = 'text/plain'
+            case _:
+                content_type = 'text/plain'
 
         try:
             s3_path = '{}/{}/{}'.format(self.output_s3_folder,
@@ -199,8 +206,8 @@ class Utils:
             self.supabase_connection.upload(file=content, path=s3_path, file_options={"content-type": content_type})
             self.log.info('File {} uploaded to S3 bucket at {}'.format(filename, s3_path))
         except Exception as e:
-            message = ('Error uploading the file {} to the S3 bucket: {}'.
-                       format(filename, e.args[0]['message']))
+            message = ('Error uploading the file {} to the S3 bucket.'.
+                       format(filename), str(e))
             self.log.error(message)
 
     '''
@@ -260,3 +267,118 @@ class Utils:
         sys.stderr = original_stderr
 
         return audio_tensor
+
+    def merge_results(self,
+                      evaluations: pd.DataFrame,
+                      text_results: pd.DataFrame,
+                      video_results: pd.DataFrame,
+                      audio_results: pd.DataFrame) -> None:
+        self.log.info(
+            'Merging results from text, audio and video processing for speaker {}'.format(self.current_speaker))
+        evaluations = pd.concat([evaluations, text_results], ignore_index=True)
+
+        for index, row in video_results.iterrows():
+            # Find the corresponding row in evaluations based on matching values of columns speaker and file
+            mask = (evaluations['speaker'] == row['speaker']) & (evaluations['file'] == row['file'])
+            # Update values of column video_emotions in evaluations with corresponding values from video_results
+            evaluations.loc[mask, 'video_emotions'] = (evaluations.loc[mask, 'video_emotions'].
+                                                       apply(lambda x: row['video_emotions']))
+
+        for index, row in audio_results.iterrows():
+            # Find the corresponding row in evaluations based on matching values of columns speaker and file
+            mask = (evaluations['speaker'] == row['speaker']) & (evaluations['file'] == row['file'])
+            # Update values of column audio_emotions in evaluations with corresponding values from audio_results
+            evaluations.loc[mask, 'audio_emotions'] = (evaluations.loc[mask, 'audio_emotions'].
+                                                       apply(lambda x: row['audio_emotions']))
+
+        # Save the results file to S3
+        filename = 'results.h5'
+        s3_path = '{}/results/{}'.format(self.output_s3_folder, filename)
+        with tempfile.NamedTemporaryFile(suffix='.h5', delete=False) as temp_file:
+            temp_file_path = temp_file.name
+            try:
+                # Write the file to the temporary file
+                with pd.HDFStore(temp_file_path) as store:
+                    store.put('text', text_results)
+                    store.put('video', video_results)
+                    store.put('audio', audio_results)
+                    store.put('all', evaluations)
+
+                with open(temp_file_path, 'rb') as f:
+                    try:
+                        self.supabase_connection.upload(file=f, path=s3_path,
+                                                        file_options={'content-type': 'application/octet-stream'})
+                        self.log.info('File {} uploaded to S3 bucket at {}'.format(filename, s3_path))
+                    except Exception as e:
+                        message = (
+                            'Error uploading the file {} to the S3 bucket. '.format(filename), str(e))
+                        self.log.info(message)
+            finally:
+                temp_file.close()
+                if os.path.exists(temp_file_path):
+                    os.remove(temp_file_path)
+
+        self.log.info('Results merged successfully')
+
+    def open_input_file(self, videoname: str, env: str) -> Tuple[AudioSegment, str, str] | None:
+        if env == 'S3':
+            s3_path = '{}/{}/raw/{}'.format(self.session_id, self.interview_id, videoname)
+            try:
+                video_bytes = self.supabase_connection.download(s3_path)
+                self.log.info('Getting file {} from the S3 bucket'.format(videoname))
+                # Create a temporary file
+                with tempfile.NamedTemporaryFile(suffix='.mp4', delete=False) as temp_file:
+                    temp_file_path = temp_file.name
+                    try:
+                        # Write the video_bytes to the temporary file
+                        temp_file.write(video_bytes)
+                        # Ensure data is written to disk
+                        temp_file.flush()
+                        self.log.info('Starting audio extraction from video file')
+                        # Open the video from the temporary file and extract the audio
+                        audio = VideoFileClip(temp_file_path).audio
+                        self.log.info('Audio extraction finished')
+
+                        with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as temp_file_2:
+                            temp_file_path_2 = temp_file_2.name
+                            try:
+                                # Write the AudioFileClip to the temporary file
+                                audio.write_audiofile(temp_file_path_2, codec='pcm_s16le')
+
+                                # Load the temporary file with pydub
+                                audio_segment = AudioSegment.from_file(temp_file_path_2, format='wav')
+                            finally:
+                                temp_file_2.close()
+                    finally:
+                        temp_file.close()
+            except Exception as e:
+                message = ('Error downloading the file {} from the S3 bucket. '.
+                           format(videoname), str(e))
+                self.log.error(message)
+                sys.exit(1)
+            return audio_segment, temp_file_path, temp_file_path_2
+        elif env == 'Local':
+            filename = self.config['GENERAL']['Filename']
+            base_folder = os.path.join(os.path.dirname(__file__),
+                                       self.config['FOLDERS']['Main'],
+                                       self.session_id,
+                                       self.interview_id)
+            video_path = os.path.join(base_folder, self.config['FOLDERS']['Input'], filename)
+            self.log.info('File {} opened from local system'.format(videoname))
+            video = VideoFileClip(video_path)
+            self.log.info('Starting audio extraction from video file')
+            audio = video.audio
+            with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as temp_file_2:
+                temp_file_path_2 = temp_file_2.name
+                try:
+                    # Write the AudioFileClip to the temporary file
+                    audio.write_audiofile(temp_file_path_2, codec='pcm_s16le')
+
+                    # Load the temporary file with pydub
+                    audio_segment = AudioSegment.from_file(temp_file_path_2, format='wav')
+                finally:
+                    temp_file_2.close()
+            self.log.info('Audio extraction finished')
+            return audio_segment, filename, temp_file_path_2
+        else:
+            return None

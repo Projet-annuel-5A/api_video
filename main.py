@@ -1,23 +1,31 @@
 import os
 import sys
 import time
-import tempfile
 import threading
 import pandas as pd
 from tqdm import tqdm
 from queue import Queue
 from fastapi import FastAPI
 from pydub import AudioSegment
-from typing import Dict, Tuple
+from dotenv import load_dotenv
+from typing import Dict, Tuple, List
 from middleware.utils.utils import Utils
-from moviepy.editor import VideoFileClip
 from model_text.textEmotions import TextEmotions
 from middleware.utils.diarizator import Diarizator
 from middleware.utils.audioSplit import AudioSplit
 from model_audio.audioEmotions import AudioEmotions
 from model_video.videoEmotions import VideoEmotions
 
+
 app = FastAPI()
+
+# Load environment variables from .env file
+load_dotenv()
+
+# Read startup parameters from environment variables
+SESSION_ID = os.getenv("SESSION_ID")
+INTERVIEW_ID = os.getenv("INTERVIEW_ID")
+CURRENT_SPEAKER = 'speaker_00{}'.format(os.getenv("CURRENT_SPEAKER"))
 
 
 def __init_all(session_id: str, interview_id: str, speaker_name: str) -> None:
@@ -36,90 +44,21 @@ def __init_all(session_id: str, interview_id: str, speaker_name: str) -> None:
     vte = VideoEmotions(session_id, interview_id, speaker_name)
 
 
-def __open_input_file(videoname: str, env: str) -> Tuple[AudioSegment, str, str] | None:
-    if env == 'S3':
-        s3_path = '{}/{}/raw/{}'.format(utils.session_id, utils.interview_id, videoname)
-        try:
-            video_bytes = utils.supabase_connection.download(s3_path)
-            utils.log.info('Getting file {} from the S3 bucket'.format(videoname))
-            # Create a temporary file
-            with tempfile.NamedTemporaryFile(suffix='.mp4', delete=False) as temp_file:
-                temp_file_path = temp_file.name
-                try:
-                    # Write the video_bytes to the temporary file
-                    temp_file.write(video_bytes)
-                    # Ensure data is written to disk
-                    temp_file.flush()
-                    utils.log.info('Starting audio extraction from video file')
-                    # Open the video from the temporary file and extract the audio
-                    audio = VideoFileClip(temp_file_path).audio
-                    utils.log.info('Audio extraction finished')
-
-                    with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as temp_file_2:
-                        temp_file_path_2 = temp_file_2.name
-                        try:
-                            # Write the AudioFileClip to the temporary file
-                            audio.write_audiofile(temp_file_path_2, codec='pcm_s16le')
-
-                            # Load the temporary file with pydub
-                            audio_segment = AudioSegment.from_file(temp_file_path_2, format='wav')
-                        finally:
-                            temp_file_2.close()
-                finally:
-                    temp_file.close()
-        except Exception as e:
-            message = ('Error downloading the file {} from the S3 bucket: {}'.
-                       format(videoname, e.args[0]['message']))
-            utils.log.error(message)
-            sys.exit(1)
-        return audio_segment, temp_file_path, temp_file_path_2
-    elif env == 'Local':
-        filename = utils.config['GENERAL']['Filename']
-        base_folder = os.path.join(os.path.dirname(__file__),
-                                   utils.config['FOLDERS']['Main'],
-                                   utils.session_id,
-                                   utils.interview_id)
-        video_path = os.path.join(base_folder, utils.config['FOLDERS']['Input'], filename)
-        utils.log.info('File {} opened from local system'.format(videoname))
-        video = VideoFileClip(video_path)
-        utils.log.info('Starting audio extraction from video file')
-        audio = video.audio
-        with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as temp_file_2:
-            temp_file_path_2 = temp_file_2.name
-            try:
-                # Write the AudioFileClip to the temporary file
-                audio.write_audiofile(temp_file_path_2, codec='pcm_s16le')
-
-                # Load the temporary file with pydub
-                audio_segment = AudioSegment.from_file(temp_file_path_2, format='wav')
-            finally:
-                temp_file_2.close()
-        utils.log.info('Audio extraction finished')
-        return audio_segment, filename, temp_file_path_2
-    else:
-        return None
-
-
 def __analyze_text(all_texts: pd.DataFrame(), queue: Queue) -> None:
     all_texts['text_emotions'] = tte.process(all_texts['text'])
-
-    # Save the results dataframe to a csv file
-    # with pd.HDFStore(os.path.join(utils.output_folder, 'results_{}.h5'.format(utils.current_speaker))) as store:
-    #    store.put('text', all_texts)
 
     queue.put(('emotions_from_text', all_texts))
 
 
-def __analyse_video(_speakers: Dict, queue: Queue) -> None:
+def __analyse_video(_speakers: Dict[str, List[Tuple[float, float]]], queue: Queue) -> None:
     results = pd.DataFrame(columns=['speaker', 'file', 'video_emotions'])
 
+    # TODO Sent json.dumps(_speakers) to the API
     files, emotions = vte.process_folder(_speakers)
     results['file'] = files
+    # TODO results['video_emotions'] = json.loads(emotions)
     results['video_emotions'] = emotions
     results['speaker'] = utils.current_speaker
-
-    # with pd.HDFStore(os.path.join(utils.output_folder, 'results_{}.h5'.format(utils.current_speaker))) as store:
-    #    store.put('video', results)
 
     queue.put(('emotions_from_video', results))
 
@@ -133,9 +72,6 @@ def __analyse_audio(queue: Queue) -> None:
     results['audio_emotions'] = emotions
     results['speaker'] = utils.current_speaker
 
-    # with pd.HDFStore(os.path.join(utils.output_folder, 'results_{}.h5'.format(utils.current_speaker))) as store:
-    #    store.put('audio', results)
-
     queue.put(('emotions_from_audio', results))
 
 
@@ -144,57 +80,6 @@ def __split_audio(_audiofile: AudioSegment, _speakers: Dict, lang: str = 'french
     texts = asp.process(_audiofile, _speakers, lang)
     utils.log.info('Split audio finished')
     return texts
-
-
-def __merge_results(evaluations: pd.DataFrame,
-                    text_results: pd.DataFrame,
-                    video_results: pd.DataFrame,
-                    audio_results: pd.DataFrame) -> None:
-    utils.log.info('Merging results from text, audio and video processing for speaker {}'.format(utils.current_speaker))
-    evaluations = pd.concat([evaluations, text_results], ignore_index=True)
-
-    for index, row in video_results.iterrows():
-        # Find the corresponding row in evaluations based on matching values of columns speaker and file
-        mask = (evaluations['speaker'] == row['speaker']) & (evaluations['file'] == row['file'])
-        # Update values of column video_emotions in evaluations with corresponding values from video_results
-        evaluations.loc[mask, 'video_emotions'] = (evaluations.loc[mask, 'video_emotions'].
-                                                   apply(lambda x: row['video_emotions']))
-
-    for index, row in audio_results.iterrows():
-        # Find the corresponding row in evaluations based on matching values of columns speaker and file
-        mask = (evaluations['speaker'] == row['speaker']) & (evaluations['file'] == row['file'])
-        # Update values of column audio_emotions in evaluations with corresponding values from audio_results
-        evaluations.loc[mask, 'audio_emotions'] = (evaluations.loc[mask, 'audio_emotions'].
-                                                   apply(lambda x: row['audio_emotions']))
-
-    # Save the results file to S3
-    filename = 'results.h5'
-    s3_path = '{}/results/{}'.format(utils.output_s3_folder, filename)
-    with tempfile.NamedTemporaryFile(suffix='.h5', delete=False) as temp_file:
-        temp_file_path = temp_file.name
-        try:
-            # Write the file to the temporary file
-            with pd.HDFStore(temp_file_path) as store:
-                store.put('text', text_results)
-                store.put('video', video_results)
-                store.put('audio', audio_results)
-                store.put('all', evaluations)
-
-            with open(temp_file_path, 'rb') as f:
-                try:
-                    utils.supabase_connection.upload(file=f, path=s3_path,
-                                                     file_options={'content-type': 'application/octet-stream'})
-                    utils.log('File {} uploaded to S3 bucket at {}'.format(filename, s3_path))
-                except Exception as e:
-                    message = (
-                        'Error uploading the file {} to the S3 bucket: {}'.format(filename, e.args[0]['message']))
-                    utils.log(message)
-        finally:
-            temp_file.close()
-            if os.path.exists(temp_file_path):
-                os.remove(temp_file_path)
-
-    utils.log.info('Results merged successfully')
 
 
 def __process_all(queue: Queue) -> None:
@@ -209,15 +94,13 @@ def __process_all(queue: Queue) -> None:
         filename = utils.config['GENERAL']['Filename']
         # Extract the audio from the video file
         # TODO Change env
-        audio_file, temp_file_path, temp_file_path_2 = __open_input_file(filename, 'S3')
+        audio_file, temp_file_path, temp_file_path_2 = utils.open_input_file(filename, 'S3')
         audio_name = '{}.wav'.format(filename.split('.')[0])
-        # audio.write_audiofile('./files/{}'.format(audio_name))
 
         # Diarize and split the audio file
         speakers = drz.process(audio_file, audio_name)
         texts = __split_audio(audio_file, speakers, 'french')
 
-        __analyze_text(texts, results_queue)
         # Define the processing threads
         thread_process_text = threading.Thread(target=__analyze_text, args=(texts, results_queue,))
         thread_process_audio = threading.Thread(target=__analyse_audio, args=(results_queue, ))
@@ -243,7 +126,7 @@ def __process_all(queue: Queue) -> None:
             elif thread_id == 'emotions_from_audio':
                 audio_results = result
 
-        __merge_results(evaluations, text_results, video_results, audio_results)
+        utils.merge_results(evaluations, text_results, video_results, audio_results)
         result = (True, None)
 
     except Exception as e:

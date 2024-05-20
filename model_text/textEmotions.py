@@ -1,7 +1,7 @@
 import torch
 import pandas as pd
 from typing import Dict
-from .utils.utils import Utils
+from utils.utils import Utils
 
 
 class TextEmotions:

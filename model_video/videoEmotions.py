@@ -4,7 +4,7 @@ import torch
 import tempfile
 import numpy as np
 import torch.nn as nn
-from .utils.utils import Utils
+from utils.utils import Utils
 from typing import List, Dict, Tuple
 
 
@@ -62,8 +62,8 @@ class VideoEmotions:
                 for i in range(len(parts)):
                     video_emotions = {}
                     part_name = 'part_{:05d}'.format(i)
-                    start_time = parts['start'][i]
-                    end_time = parts['end'][i]
+                    start_time = parts[i][0]
+                    end_time = parts[i][1]
 
                     # Calculate frame indices for starting and ending times
                     start_frame = int(start_time * fps)

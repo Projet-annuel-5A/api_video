@@ -1,22 +1,50 @@
-import json
-
+import os
 import uvicorn
+from typing import List, Dict
+from pydantic import BaseModel
+from dotenv import load_dotenv
 from audioEmotions import AudioEmotions
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
+
 
 app = FastAPI()
+
+
+class OutputModel(BaseModel):
+    file: List[str]
+    audio_emotions: List[Dict[str, float]]
+
+
+# Load environment variables from .env file
+load_dotenv()
+
+# Read startup parameters from environment variables
+SESSION_ID = os.getenv("SESSION_ID")
+INTERVIEW_ID = os.getenv("INTERVIEW_ID")
+CURRENT_SPEAKER = 'speaker_00{}'.format(os.getenv("CURRENT_SPEAKER"))
+
+# Initialize the TextEmotions class
+ate = AudioEmotions(session_id=SESSION_ID,
+                    interview_id=INTERVIEW_ID,
+                    current_speaker=CURRENT_SPEAKER)
+
 
 @app.get("/health")
 def health():
     return {"status": "ok"}
 
-@app.post("/process_folder")
-async def process_folder(session_id, interview_id, current_speaker):
-    ate = AudioEmotions(session_id=session_id, interview_id=interview_id, current_speaker=current_speaker)
-    all_files, all_emotions = ate.process_folder()
-    #return json.dumps([all_files, all_emotions])
-    json_compatible_item_data = jsonable_encoder([all_files, all_emotions])
-    return JSONResponse(content=json_compatible_item_data)
+
+@app.post("/analyse_audio", response_model=OutputModel)
+async def process_audio():
+    try:
+        all_files, all_emotions = ate.process_folder()
+        res = OutputModel(
+            file=all_files,
+            audio_emotions=all_emotions
+        )
+        return res
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 if __name__ == "__main__":

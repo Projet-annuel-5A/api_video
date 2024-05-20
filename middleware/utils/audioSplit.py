@@ -36,15 +36,15 @@ class AudioSplit:
         self.utils.log.info('Timeline for {} saved at {}'.format(self.utils.current_speaker, path))
     '''
 
-    def __split_to_text(self, audiofile: AudioSegment, parts: pd.DataFrame, lang: str) -> pd.DataFrame:
+    def __split_to_text(self, audiofile: AudioSegment, parts: Dict, lang: str) -> pd.DataFrame:
         self.utils.log.info('Start splitting audio file for {}'.format(self.utils.current_speaker))
         all_texts = pd.DataFrame(columns=['file', 'text'])
 
         for i in range(len(parts)):
             part_name = 'part_{:05d}'.format(i)
 
-            start = parts.loc[i, "start"] * 1000
-            end = parts.loc[i, "end"] * 1000
+            start = parts[i][0] * 1000
+            end = parts[i][1] * 1000
             split_audio = audiofile[start:end+500]
 
             self.utils.save_to_s3('part_{:05d}.wav'.format(i), split_audio.export(format='wav').read(),
