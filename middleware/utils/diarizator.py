@@ -11,11 +11,8 @@ class Diarizator:
 
     def __split_diarization(self, diarization: Annotation) -> Dict[str, List[Tuple[float, float]]]:
         self.utils.log.info('Start splitting diarization')
-
         speakers_dict = {}
-        current_speaker = ''
-        values = Tuple[float, float]
-
+        '''
         for turn, _, speaker in diarization.itertracks(yield_label=True):
             speaker = 'speaker_{:03d}'.format(int(speaker.split('_')[1]))
             if current_speaker == '':
@@ -29,10 +26,16 @@ class Diarizator:
                 speakers_dict[current_speaker].append(values)
                 current_speaker = speaker
                 values = (turn.start, turn.end)
-
         if speakers_dict.get(current_speaker) is None:
             speakers_dict[current_speaker] = list()
         speakers_dict[current_speaker].append(values)
+        '''
+        for turn, _, speaker in diarization.itertracks(yield_label=True):
+            current_speaker = 'speaker_{:03d}'.format(int(speaker.split('_')[1]))
+            values = (turn.start, turn.end)
+            if speakers_dict.get(current_speaker) is None:
+                speakers_dict[current_speaker] = list()
+            speakers_dict[current_speaker].append(values)
 
         self.utils.log.info('Split completed successfully')
         return speakers_dict
