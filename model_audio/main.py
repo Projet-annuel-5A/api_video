@@ -1,14 +1,9 @@
 import uvicorn
 import pandas as pd
-from dotenv import load_dotenv
 from audioEmotions import AudioEmotions
 from fastapi import FastAPI, HTTPException
 
-
 app = FastAPI()
-
-# Load environment variables from .env file
-load_dotenv()
 
 
 @app.get("/health")

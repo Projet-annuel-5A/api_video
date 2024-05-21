@@ -46,7 +46,7 @@ class AudioSplit:
             split_audio = audiofile[start:end+500]
 
             self.utils.save_to_s3('part_{:05d}.wav'.format(i), split_audio.export(format='wav').read(),
-                                  'audio', '{}/audioparts'.format(current_speaker))
+                                  'audio', current_speaker)
 
             tensor_audio = self.utils.audiosegment_to_tensor(split_audio)
             sampling_rate = split_audio.frame_rate

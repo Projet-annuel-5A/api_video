@@ -2,10 +2,13 @@ import torch
 import pandas as pd
 from typing import Dict
 from utils.utils import Utils
+from dotenv import load_dotenv
 
 
 class TextEmotions:
     def __init__(self, session_id: int, interview_id: int) -> None:
+        # Load environment variables from .env file
+        load_dotenv()
         self.utils = Utils(session_id, interview_id)
 
     def __process_text(self, text: str) -> Dict[str, float]:

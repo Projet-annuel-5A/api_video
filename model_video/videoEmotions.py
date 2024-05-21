@@ -7,10 +7,13 @@ import pandas as pd
 import torch.nn as nn
 from typing import Dict
 from utils.utils import Utils
+from dotenv import load_dotenv
 
 
 class VideoEmotions:
     def __init__(self, session_id: int, interview_id: int) -> None:
+        # Load environment variables from .env file
+        load_dotenv()
         self.utils = Utils(session_id, interview_id)
 
     def __predict(self, image: np.ndarray) -> Dict[str, float]:

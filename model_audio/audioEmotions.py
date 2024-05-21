@@ -4,12 +4,15 @@ import tempfile
 import torchaudio
 import numpy as np
 from utils.utils import Utils
+from dotenv import load_dotenv
 import torch.nn.functional as f
 from typing import Dict, List, Tuple
 
 
 class AudioEmotions:
     def __init__(self, session_id: int, interview_id: int) -> None:
+        # Load environment variables from .env file
+        load_dotenv()
         self.utils = Utils(session_id, interview_id)
 
     def __speech_file_to_array_fn(self, path: str, sampling_rate: int) -> np.ndarray:

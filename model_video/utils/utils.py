@@ -150,6 +150,7 @@ class Utils:
 
     def end_log(self) -> None:
         log_handlers = logging.getLogger('videoLog').handlers[:]
+        print('Video analysis finished. Saving {} log'.format(len(log_handlers)))
         for handler in log_handlers:
             if isinstance(handler, BufferingHandler):
                 log = handler.flush()

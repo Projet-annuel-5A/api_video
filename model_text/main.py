@@ -1,20 +1,8 @@
 import uvicorn
-from typing import List
-from pydantic import BaseModel
-from dotenv import load_dotenv
 from textEmotions import TextEmotions
 from fastapi import FastAPI, HTTPException
 
-
 app = FastAPI()
-
-
-class InputItem(BaseModel):
-    texts: List[str]
-
-
-# Load environment variables from .env file
-load_dotenv()
 
 
 @app.get("/health")

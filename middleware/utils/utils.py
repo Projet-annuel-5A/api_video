@@ -8,7 +8,6 @@ import numpy as np
 import configparser
 import pandas as pd
 from datetime import datetime
-from dotenv import load_dotenv
 from pydub import AudioSegment
 from typing import Tuple, Any, List
 from moviepy.editor import VideoFileClip
@@ -63,7 +62,6 @@ class Utils:
 
     def __init__(self, session_id: int = None, interview_id: int = None) -> None:
         if not self.__initialized:
-            load_dotenv()
             self.config = self.__get_config()
 
             self.session_id = session_id
@@ -76,7 +74,7 @@ class Utils:
             # Create loggers
             self.log = self.__init_logs()
             self.log.propagate = False
-            sys.stderr = LoggerWriter(self.log, logging.ERROR)
+            # sys.stderr = LoggerWriter(self.log, logging.ERROR)
 
             self.supabase_client = self.__check_supabase_connection()
             self.supabase_connection = self.__connect_to_bucket()
