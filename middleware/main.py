@@ -23,38 +23,38 @@ class Process:
         self.interview_id = interview_id
         self.utils = Utils(session_id, interview_id)
 
-    def __analyze_text(self, params: Dict, queue: Queue) -> None:
+    def __analyze_text(self, params: Dict) -> bool:
         url = 'http://127.0.0.1:8002/analyse_text'
         response = requests.post(url, params=params)
 
         if response.status_code == 200:
             # TODO update value in DB
-            queue.put(('emotions_from_text', True))
+            return True
         else:
             self.utils.log.error("Error:", response.status_code)
-            queue.put(('emotions_from_text', False))
+            return False
 
-    def __analyse_video(self, params: Dict, queue: Queue) -> None:
+    def __analyse_video(self, params: Dict) -> bool:
         url = 'http://127.0.0.1:8003/analyse_video'
         response = requests.post(url, params=params)
 
         if response.status_code == 200:
             # TODO update value in DB
-            queue.put(('emotions_from_video', True))
+            return True
         else:
             self.utils.log.error("Error:", response.status_code)
-            queue.put(('emotions_from_video', False))
+            return False
 
-    def __analyse_audio(self, params: Dict, queue: Queue) -> None:
+    def __analyse_audio(self, params: Dict) -> bool:
         url = 'http://127.0.0.1:8001/analyse_audio'
         response = requests.post(url, params=params)
 
         if response.status_code == 200:
             # TODO update value in DB
-            queue.put(('emotions_from_audio', True))
+            return True
         else:
             self.utils.log.error("Error:", response.status_code)
-            queue.put(('emotions_from_audio', False))
+            return False
 
     def __split_audio(self, _audiofile: AudioSegment, _speakers: Dict, lang: str = 'french') -> None:
         asp = AudioSplit()
@@ -67,9 +67,6 @@ class Process:
 
     def __process_all(self, queue: Queue) -> None:
         drz = Diarizator()
-        text_results = False
-        video_results = False
-        audio_results = False
         temp_files = []
         params = {
             'session_id': self.session_id,
@@ -78,7 +75,6 @@ class Process:
 
         try:
             # Create a queue to store the results
-            results_queue = Queue()
             filename = self.utils.config['GENERAL']['Filename']
             # Extract the audio from the video file
             audio_file, temp_file_path, temp_file_path_2 = self.utils.open_input_file(filename)
@@ -91,30 +87,11 @@ class Process:
             self.utils.save_to_s3('speakers.json', json.dumps(speakers).encode(), 'text', 'temp')
             self.__split_audio(audio_file, speakers, self.utils.config['GENERAL']['Language'])
 
-            # Define the processing threads
-            thread_process_text = threading.Thread(target=self.__analyze_text, args=(params, results_queue))
-            thread_process_audio = threading.Thread(target=self.__analyse_audio, args=(params, results_queue))
-            thread_process_video = threading.Thread(target=self.__analyse_video, args=(params, results_queue))
-    
-            # Start the threads
-            self.utils.log.info('Starting emotions detection threads from text, audio and video')
-            thread_process_text.start()
-            thread_process_audio.start()
-            thread_process_video.start()
-    
-            # Wait for all threads to finish
-            thread_process_text.join()
-            thread_process_audio.join()
-            thread_process_video.join()
+            self.utils.log.info('Starting emotions detection from text, audio and video')
+            text_results = self.__analyze_text(params)
+            audio_results = self.__analyse_audio(params)
+            video_results = self.__analyse_video(params)
             self.utils.log.info('Emotions detection threads from text, audio and video have finished')
-            while not results_queue.empty():
-                thread_id, result = results_queue.get()
-                if thread_id == 'emotions_from_text':
-                    text_results = result
-                elif thread_id == 'emotions_from_video':
-                    video_results = result
-                elif thread_id == 'emotions_from_audio':
-                    audio_results = result
 
             if text_results and video_results and audio_results:
                 self.utils.merge_results()
