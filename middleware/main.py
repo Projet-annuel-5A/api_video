@@ -7,12 +7,12 @@ import threading
 import pandas as pd
 from tqdm import tqdm
 from queue import Queue
-from utils.utils import Utils
+from .utils.utils import Utils
 from dotenv import load_dotenv
 from pydub import AudioSegment
 from typing import Dict, Tuple, List
-from utils.diarizator import Diarizator
-from utils.audioSplit import AudioSplit
+from .utils.diarizator import Diarizator
+from .utils.audioSplit import AudioSplit
 from fastapi import FastAPI, HTTPException
 # from model_text.textEmotions import TextEmotions
 # from model_audio.audioEmotions import AudioEmotions
@@ -24,13 +24,8 @@ app = FastAPI()
 # Load environment variables from .env file
 load_dotenv()
 
-# Read startup parameters from environment variables
-SESSION_ID = os.getenv("SESSION_ID")
-INTERVIEW_ID = os.getenv("INTERVIEW_ID")
-CURRENT_SPEAKER = 'speaker_00{}'.format(os.getenv("CURRENT_SPEAKER"))
 
-
-def __init_all(session_id: str, interview_id: str, speaker_name: str) -> None:
+def __init_all(session_id: int, interview_id: int) -> None:
     global utils
     global asp
     global drz
@@ -38,7 +33,7 @@ def __init_all(session_id: str, interview_id: str, speaker_name: str) -> None:
     # global tte
     # global vte
 
-    utils = Utils(session_id, interview_id, speaker_name)
+    utils = Utils(session_id, interview_id)
     asp = AudioSplit()
     # ate = AudioEmotions(session_id, interview_id, speaker_name)
     drz = Diarizator()
@@ -109,11 +104,13 @@ def __analyse_audio(queue: Queue) -> None:
     queue.put(('emotions_from_audio', results))
 
 
-def __split_audio(_audiofile: AudioSegment, _speakers: Dict, lang: str = 'french') -> pd.DataFrame:
+def __split_audio(_audiofile: AudioSegment, _speakers: Dict, lang: str = 'french') -> None:
     utils.log.info('Starting split audio')
     texts = asp.process(_audiofile, _speakers, lang)
+    # Save texts to S3
+    utils.df_to_temp_s3(texts, filename='texts')
     utils.log.info('Split audio finished')
-    return texts
+    # TODO update diarization champ in DB
 
 
 def __process_all(queue: Queue) -> None:
@@ -133,8 +130,9 @@ def __process_all(queue: Queue) -> None:
 
         # Diarize and split the audio file
         speakers = drz.process(audio_file, audio_name)
-        texts = __split_audio(audio_file, speakers, 'french')
-
+        utils.save_to_s3('speakers.json', json.dumps(speakers).encode(), 'text', 'temp')
+        __split_audio(audio_file, speakers, utils.config['GENERAL']['Language'])
+        '''
         # Define the processing threads
         thread_process_text = threading.Thread(target=__analyze_text, args=(texts, results_queue,))
         thread_process_audio = threading.Thread(target=__analyse_audio, args=(results_queue, ))
@@ -161,25 +159,24 @@ def __process_all(queue: Queue) -> None:
                 audio_results = result
 
         utils.merge_results(evaluations, text_results, video_results, audio_results)
+    '''
         result = (True, None)
-
     except Exception as e:
         result = (False, e)
 
-    utils.delete_temp_files([temp_file_path, temp_file_path_2])
+    # TODO uncomment block
+    '''
+    finally:
+        utils.delete_temp_files([temp_file_path, temp_file_path_2])
+    '''
     queue.put(result)
 
 
-@app.get("/start_process")
-async def process():
+def process(session_id: int, interview_id: int):
     try:
         print('Program started')
 
-        session_id = os.getenv("SESSION_ID")
-        interview_id = os.getenv("INTERVIEW_ID")
-        current_speaker = os.getenv("CURRENT_SPEAKER")
-        speaker_name = 'speaker_00{}'.format(current_speaker)
-        __init_all(session_id, interview_id, speaker_name)
+        __init_all(session_id, interview_id)
         main_queue = Queue()
 
         utils.log.info("Program started => Session: {} | Interview: {}".format(session_id, interview_id))
@@ -210,39 +207,21 @@ async def process():
             utils.log.error('An error occurred: {}. Program aborted'.format(result[1]))
             print('\n\nAn error occurred: {}. Program aborted'.format(result[1]))
 
-        utils.end_logs()
-        # ate.utils.end_logs()
-        # tte.utils.end_logs()
-        # vte.utils.end_logs()
-
-        url = 'http://127.0.0.1:8001/end_audio_log'
-        response = requests.get(url)
-        if response.status_code == 200:
-            utils.log.info("Audio log saved")
-        else:
-            utils.log.error("Error:", response.status_code)
-
-        url = 'http://127.0.0.1:8002/end_text_log'
-        response = requests.get(url)
-        if response.status_code == 200:
-            utils.log.info("Text log saved")
-        else:
-            utils.log.error("Error:", response.status_code)
-
-        url = 'http://127.0.0.1:8003/end_video_log'
-        response = requests.get(url)
-        if response.status_code == 200:
-            utils.log.info("Video log saved")
-        else:
-            utils.log.error("Error:", response.status_code)
-
         return {"status": "ok"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        utils.end_logs()
 
 
 @app.get("/health")
 def health():
+    return {"status": "ok"}
+
+
+@app.post("/predict")
+async def predict(session_id: int, interview_id: int):
+    process(session_id, interview_id)
     return {"status": "ok"}
 
 

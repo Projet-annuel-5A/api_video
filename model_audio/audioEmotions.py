@@ -9,8 +9,8 @@ from typing import Dict, List, Tuple
 
 
 class AudioEmotions:
-    def __init__(self, session_id: str, interview_id: str, current_speaker: str) -> None:
-        self.utils = Utils(session_id, interview_id, current_speaker)
+    def __init__(self, session_id: int, interview_id: int) -> None:
+        self.utils = Utils(session_id, interview_id)
 
     def __speech_file_to_array_fn(self, path: str, sampling_rate: int) -> np.ndarray:
         speech_array, _sampling_rate = torchaudio.load(path)
@@ -43,11 +43,11 @@ class AudioEmotions:
 
         return sorted_values
 
-    def process_folder(self) -> Tuple[List, List]:
+    def process_folder(self, current_speaker: str) -> Tuple[List, List]:
         all_files = list()
         all_emotions = list()
 
-        s3_path = '{}/{}/audioparts'.format(self.utils.output_s3_folder, self.utils.current_speaker)
+        s3_path = '{}/{}/audioparts'.format(self.utils.output_s3_folder, current_speaker)
         for file in self.utils.supabase_connection.list(s3_path):
             filename = file['name']
             if filename.split('.')[-1] == 'wav':
@@ -57,7 +57,7 @@ class AudioEmotions:
 
                     try:
                         temp_file.write(downloaded_file)
-                        emotions = self.__predict(file, temp_file_path)
+                        emotions = self.__predict(filename, temp_file_path)
                     finally:
                         temp_file.close()
                         # Clean up the temporary file
@@ -65,6 +65,6 @@ class AudioEmotions:
                             os.remove(temp_file_path)
 
             all_emotions.append(emotions)
-            all_files.append(filename.split('.')[0])
-
+            part_number = int((filename.split('.')[0]).split('_')[-1])
+            all_files.append(part_number)
         return all_files, all_emotions

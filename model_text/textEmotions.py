@@ -1,12 +1,13 @@
 import torch
+import tempfile
 import pandas as pd
 from typing import Dict
 from utils.utils import Utils
 
 
 class TextEmotions:
-    def __init__(self, session_id: str, interview_id: str, current_speaker: str) -> None:
-        self.utils = Utils(session_id, interview_id, current_speaker)
+    def __init__(self, session_id: int, interview_id: int) -> None:
+        self.utils = Utils(session_id, interview_id)
 
     def __process_text(self, text: str) -> Dict[str, float]:
         inputs = self.utils.tte_tokenizer(text, return_tensors="pt")

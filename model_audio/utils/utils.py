@@ -1,11 +1,14 @@
 import os
 import sys
+import json
 import torch
 import logging
 import warnings
+import tempfile
 import configparser
-from typing import Tuple, Any
+import pandas as pd
 from datetime import datetime
+from typing import Tuple, Any, List
 from supabase import create_client, Client
 warnings.filterwarnings("ignore", category=UserWarning)
 from transformers import (AutoModelForAudioClassification,
@@ -38,13 +41,12 @@ class Utils:
             cls._instance.__initialized = False
         return cls._instance
 
-    def __init__(self, session_id: str, interview_id: str, current_speaker: str) -> None:
+    def __init__(self, session_id: int, interview_id: int) -> None:
         if not self.__initialized:
             self.config = self.__get_config()
 
             self.session_id = session_id
             self.interview_id = interview_id
-            self.current_speaker = current_speaker
             self.device = "cuda:0" if torch.cuda.is_available() else "cpu"
 
             # S3 Folders
@@ -149,7 +151,7 @@ class Utils:
             self.log.error(message)
             return False
 
-    def end_logs(self) -> None:
+    def end_log(self) -> None:
         log_handlers = logging.getLogger('audioLog').handlers[:]
         for handler in log_handlers:
             if isinstance(handler, BufferingHandler):
@@ -157,3 +159,31 @@ class Utils:
                 if log:
                     self.save_to_s3('{}.log'.format(handler.filename), log.encode(), 'text', 'logs')
             logging.getLogger('audioLog').removeHandler(handler)
+
+    def df_to_temp_s3(self, df: pd.DataFrame, filename: str) -> None:
+        s3_path = '{}/temp/{}.tmp'.format(self.output_s3_folder, filename)
+        with tempfile.NamedTemporaryFile(suffix='.h5', delete=False) as temp_file:
+            temp_file_path = temp_file.name
+            try:
+                df.to_hdf(temp_file_path, key='data', mode='w', complevel=9, complib='blosc')
+
+                with open(temp_file_path, 'rb') as f:
+                    try:
+                        self.supabase_connection.upload(file=f, path=s3_path,
+                                                        file_options={'content-type': 'application/octet-stream'})
+                        self.log.info('File {} uploaded to S3 bucket'.format(s3_path))
+                    except Exception as e:
+                        message = (
+                            'Error uploading the file to the S3 bucket. ', str(e))
+                        self.log.info(message)
+            finally:
+                temp_file.close()
+                if os.path.exists(temp_file_path):
+                    os.remove(temp_file_path)
+
+    def get_speakers_from_s3(self) -> List[str]:
+        path = '{}/temp/speakers.json'.format(self.output_s3_folder)
+        res = self.supabase_connection.download(path)
+        speakers_str = res.decode()
+        speakers = json.loads(speakers_str)
+        return list(speakers.keys())

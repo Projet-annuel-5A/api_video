@@ -3,7 +3,9 @@ import sys
 import torch
 import logging
 import warnings
+import tempfile
 import configparser
+import pandas as pd
 from typing import Tuple, Any
 from datetime import datetime
 from supabase import create_client, Client
@@ -38,13 +40,12 @@ class Utils:
             cls._instance.__initialized = False
         return cls._instance
 
-    def __init__(self, session_id: str, interview_id: str, current_speaker: str) -> None:
+    def __init__(self, session_id: int, interview_id: int) -> None:
         if not self.__initialized:
             self.config = self.__get_config()
 
             self.session_id = session_id
             self.interview_id = interview_id
-            self.current_speaker = current_speaker
             self.device = "cuda:0" if torch.cuda.is_available() else "cpu"
 
             # S3 Folders
@@ -150,7 +151,7 @@ class Utils:
             self.log.error(message)
             return False
 
-    def end_logs(self) -> None:
+    def end_log(self) -> None:
         log_handlers = logging.getLogger('textLog').handlers[:]
         for handler in log_handlers:
             if isinstance(handler, BufferingHandler):
@@ -158,3 +159,38 @@ class Utils:
                 if log:
                     self.save_to_s3('{}.log'.format(handler.filename), log.encode(), 'text', 'logs')
             logging.getLogger('textLog').removeHandler(handler)
+
+    def read_texts_from_s3(self) -> pd.DataFrame:
+        path = '{}/temp/texts.tmp'.format(self.output_s3_folder)
+        with tempfile.NamedTemporaryFile(suffix='.h5', delete=False) as temp_file:
+            temp_file_path = temp_file.name
+            try:
+                res = self.supabase_connection.download(path)
+                temp_file.write(res)
+                df = pd.read_hdf(temp_file_path, key='data', index_col=None)
+            finally:
+                temp_file.close()
+                if os.path.exists(temp_file_path):
+                    os.remove(temp_file_path)
+        return df
+
+    def df_to_temp_s3(self, df: pd.DataFrame, filename: str) -> None:
+        s3_path = '{}/temp/{}.tmp'.format(self.output_s3_folder, filename)
+        with tempfile.NamedTemporaryFile(suffix='.h5', delete=False) as temp_file:
+            temp_file_path = temp_file.name
+            try:
+                df.to_hdf(temp_file_path, key='data', mode='w', complevel=9, complib='blosc')
+
+                with open(temp_file_path, 'rb') as f:
+                    try:
+                        self.supabase_connection.upload(file=f, path=s3_path,
+                                                        file_options={'content-type': 'application/octet-stream'})
+                        self.log.info('File {} uploaded to S3 bucket'.format(s3_path))
+                    except Exception as e:
+                        message = (
+                            'Error uploading the file to the S3 bucket. ', str(e))
+                        self.log.info(message)
+            finally:
+                temp_file.close()
+                if os.path.exists(temp_file_path):
+                    os.remove(temp_file_path)

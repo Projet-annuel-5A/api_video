@@ -1,5 +1,6 @@
 import os
 import uvicorn
+import pandas as pd
 from typing import List, Dict
 from pydantic import BaseModel
 from dotenv import load_dotenv
@@ -9,51 +10,35 @@ from fastapi import FastAPI, HTTPException
 
 app = FastAPI()
 
-
-class OutputModel(BaseModel):
-    file: List[str]
-    audio_emotions: List[Dict[str, float]]
-
-
 # Load environment variables from .env file
 load_dotenv()
-
-# Read startup parameters from environment variables
-SESSION_ID = os.getenv("SESSION_ID")
-INTERVIEW_ID = os.getenv("INTERVIEW_ID")
-CURRENT_SPEAKER = 'speaker_00{}'.format(os.getenv("CURRENT_SPEAKER"))
-
-# Initialize the TextEmotions class
-ate = AudioEmotions(session_id=SESSION_ID,
-                    interview_id=INTERVIEW_ID,
-                    current_speaker=CURRENT_SPEAKER)
-
 
 @app.get("/health")
 def health():
     return {"status": "ok"}
 
 
-@app.get("/analyse_audio", response_model=OutputModel)
-async def process_audio():
+@app.post("/analyse_audio")
+async def process_audio(session_id: int, interview_id: int):
+    ate = AudioEmotions(session_id=session_id,
+                        interview_id=interview_id)
     try:
-        all_files, all_emotions = ate.process_folder()
-        res = OutputModel(
-            file=all_files,
-            audio_emotions=all_emotions
-        )
-        return res
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        res = pd.DataFrame(columns=['speaker', 'part', 'audio_emotions'])
+        speakers = ate.utils.get_speakers_from_s3()
+        for current_speaker in speakers:
+            emotions = pd.DataFrame(columns=['speaker', 'part', 'audio_emotions'])
+            all_files, all_emotions = ate.process_folder(current_speaker)
+            emotions['part'] = all_files
+            emotions['audio_emotions'] = all_emotions
+            emotions['speaker'] = int(current_speaker.split('_')[1])
+            res = pd.concat([res, emotions], ignore_index=True)
 
-
-@app.get("/end_audio_log")
-async def end_audio_log():
-    try:
-        ate.utils.end_log()
+        ate.utils.df_to_temp_s3(res, filename='audio_emotions')
         return {"status": "ok"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        ate.utils.end_log()
 
 
 if __name__ == "__main__":

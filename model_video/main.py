@@ -23,39 +23,26 @@ class OutputModel(BaseModel):
 # Load environment variables from .env file
 load_dotenv()
 
-# Read startup parameters from environment variables
-SESSION_ID = os.getenv("SESSION_ID")
-INTERVIEW_ID = os.getenv("INTERVIEW_ID")
-CURRENT_SPEAKER = 'speaker_00{}'.format(os.getenv("CURRENT_SPEAKER"))
-
-# Initialize the TextEmotions class
-vte = VideoEmotions(session_id=SESSION_ID,
-                    interview_id=INTERVIEW_ID,
-                    current_speaker=CURRENT_SPEAKER)
-
 
 @app.get("/health")
 def health():
     return {"status": "ok"}
 
 
-@app.post("/analyse_video", response_model=OutputModel)
-async def process_video(speakers: InputModel):
+@app.post("/analyse_video")
+async def process_video(session_id: int, interview_id: int):
+    vte = VideoEmotions(session_id=session_id,
+                        interview_id=interview_id)
     try:
-        all_speakers = json.loads(speakers['speakers'])
-        all_files, all_emotions = vte.process_folder(all_speakers)
-        return {"all_files": all_files, "all_emotions": json.dumps(all_emotions)}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/end_video_log")
-async def end_video_log():
-    try:
-        vte.utils.end_log()
+        speakers = vte.utils.get_speakers_from_s3()
+        res = vte.process(speakers)
+        print(res)
+        vte.utils.df_to_temp_s3(res, filename='video_emotions')
         return {"status": "ok"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        vte.utils.end_log()
 
 
 if __name__ == "__main__":

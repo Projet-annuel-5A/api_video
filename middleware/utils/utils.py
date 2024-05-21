@@ -61,14 +61,13 @@ class Utils:
             cls._instance.__initialized = False
         return cls._instance
 
-    def __init__(self, session_id: str = None, interview_id: str = None, current_speaker: str = None) -> None:
+    def __init__(self, session_id: int = None, interview_id: int = None) -> None:
         if not self.__initialized:
             load_dotenv()
             self.config = self.__get_config()
 
             self.session_id = session_id
             self.interview_id = interview_id
-            self.current_speaker = current_speaker
             self.device = "cuda:0" if torch.cuda.is_available() else "cpu"
 
             # S3 Folders
@@ -381,3 +380,33 @@ class Utils:
             return audio_segment, filename, temp_file_path_2
         else:
             return None
+
+    def update_bool_db(self, interview_id: str, champ_name: str) -> None:
+        self.log.info('Updating {} in the database'.format(champ_name))
+        try:
+            self.supabase_client.table('interviews').update({champ_name: True}).eq('id', interview_id)
+            self.log.info('{} updated successfully'.format(champ_name))
+        except Exception as e:
+            message = ('Error updating {} in the database'.format(champ_name), str(e))
+            self.log.error(message)
+
+    def df_to_temp_s3(self, df: pd.DataFrame, filename: str) -> None:
+        s3_path = '{}/temp/{}.tmp'.format(self.output_s3_folder, filename)
+        with tempfile.NamedTemporaryFile(suffix='.h5', delete=False) as temp_file:
+            temp_file_path = temp_file.name
+            try:
+                df.to_hdf(temp_file_path, key='data', mode='w', complevel=9, complib='blosc')
+
+                with open(temp_file_path, 'rb') as f:
+                    try:
+                        self.supabase_connection.upload(file=f, path=s3_path,
+                                                        file_options={'content-type': 'application/octet-stream'})
+                        self.log.info('File {} uploaded to S3 bucket'.format(s3_path))
+                    except Exception as e:
+                        message = (
+                            'Error uploading the file to the S3 bucket. ', str(e))
+                        self.log.info(message)
+            finally:
+                temp_file.close()
+                if os.path.exists(temp_file_path):
+                    os.remove(temp_file_path)

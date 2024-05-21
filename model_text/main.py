@@ -18,16 +18,6 @@ class InputItem(BaseModel):
 # Load environment variables from .env file
 load_dotenv()
 
-# Read startup parameters from environment variables
-SESSION_ID = os.getenv("SESSION_ID")
-INTERVIEW_ID = os.getenv("INTERVIEW_ID")
-CURRENT_SPEAKER = 'speaker_00{}'.format(os.getenv("CURRENT_SPEAKER"))
-
-# Initialize the TextEmotions class
-tte = TextEmotions(session_id=SESSION_ID,
-                   interview_id=INTERVIEW_ID,
-                   current_speaker=CURRENT_SPEAKER)
-
 
 @app.get("/health")
 def health():
@@ -35,24 +25,21 @@ def health():
 
 
 @app.post("/analyse_text")
-async def process_text(texts: InputItem):
+async def process_text(session_id: int, interview_id: int):
+    tte = TextEmotions(session_id=session_id,
+                       interview_id=interview_id)
     try:
-        # Convert input data to pandas Series
-        all_texts = pd.Series(texts.texts)
-        res = tte.process(all_texts)
-        # Convert output series to list for JSON serialization
-        return res.astype(str).tolist()
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        # Open texts file from S3
+        df = tte.utils.read_texts_from_s3()
+        res = tte.process(df['text'])
+        df['text_emotions'] = res
 
-
-@app.get("/end_text_log")
-async def end_text_log():
-    try:
-        tte.utils.end_log()
+        tte.utils.df_to_temp_s3(df, filename='text_emotions')
         return {"status": "ok"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        tte.utils.end_log()
 
 
 if __name__ == "__main__":
