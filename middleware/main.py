@@ -41,67 +41,41 @@ def __init_all(session_id: int, interview_id: int) -> None:
     # vte = VideoEmotions(session_id, interview_id, speaker_name)
 
 
-def __analyze_text(all_texts: pd.DataFrame(), queue: Queue) -> None:
-    # all_texts['text_emotions'] = tte.process(all_texts['text'])
-
+def __analyze_text(params: Dict, queue: Queue) -> None:
     url = 'http://127.0.0.1:8002/analyse_text'
-    payload = {
-        "texts": all_texts['text'].tolist()
-    }
-    response = requests.post(url, json=payload)
+    response = requests.post(url, params=params)
 
     if response.status_code == 200:
-        all_texts['text_emotions'] = response.json()
+        # TODO update value in DB
+        queue.put(('emotions_from_text', True))
     else:
         utils.log.error("Error:", response.status_code)
+        queue.put(('emotions_from_text', False))
 
-    queue.put(('emotions_from_text', all_texts))
 
 
-def __analyse_video(_speakers: Dict[str, List[Tuple[float, float]]], queue: Queue) -> None:
-    results = pd.DataFrame(columns=['speaker', 'file', 'video_emotions'])
-
-    # files, emotions = vte.process_folder(_speakers)
-
+def __analyse_video(params: Dict, queue: Queue) -> None:
     url = 'http://127.0.0.1:8003/analyse_video'
-    payload = {
-        "speakers": json.dumps(_speakers)
-    }
-    response = requests.post(url, json=payload)
+    response = requests.post(url, params=params)
 
     if response.status_code == 200:
-        results['file'] = response.json()['all_files']
-        results['video_emotions'] = json.loads(response.json()['all_emotions'])
-        results['speaker'] = utils.current_speaker
+        # TODO update value in DB
+        queue.put(('emotions_from_video', True))
     else:
         utils.log.error("Error:", response.status_code)
-
-    # results['file'] = files
-    # results['video_emotions'] = emotions
-
-    queue.put(('emotions_from_video', results))
+        queue.put(('emotions_from_video', False))
 
 
-def __analyse_audio(queue: Queue) -> None:
-    results = pd.DataFrame(columns=['speaker', 'file', 'audio_emotions'])
-
-    # files, emotions = ate.process_folder()
-
+def __analyse_audio(params: Dict, queue: Queue) -> None:
     url = 'http://127.0.0.1:8001/analyse_audio'
-    response = requests.get(url)
+    response = requests.post(url, params=params)
 
     if response.status_code == 200:
-        results['file'] = response.json()['file']
-        results['audio_emotions'] = response.json()['audio_emotions']
-        results['speaker'] = utils.current_speaker
+        # TODO update value in DB
+        queue.put(('emotions_from_audio', True))
     else:
         utils.log.error("Error:", response.status_code)
-
-    # results['file'] = files
-    # results['audio_emotions'] = emotions
-    # results['speaker'] = utils.current_speaker
-
-    queue.put(('emotions_from_audio', results))
+        queue.put(('emotions_from_audio', False))
 
 
 def __split_audio(_audiofile: AudioSegment, _speakers: Dict, lang: str = 'french') -> None:
@@ -113,30 +87,32 @@ def __split_audio(_audiofile: AudioSegment, _speakers: Dict, lang: str = 'french
     # TODO update diarization champ in DB
 
 
-def __process_all(queue: Queue) -> None:
-    evaluations = pd.DataFrame(columns=['speaker', 'file', 'text', 'text_emotions', 'video_emotions', 'audio_emotions'])
+def __process_all(session_id: int, interview_id: int, queue: Queue) -> None:
     text_results = pd.DataFrame(columns=['speaker', 'file', 'text', 'text_emotions'])
     video_results = pd.DataFrame(columns=['speaker', 'file', 'video_emotions'])
     audio_results = pd.DataFrame(columns=['speaker', 'file', 'audio_emotions'])
+    params = {
+        'session_id': session_id,
+        'interview_id': interview_id
+    }
 
     try:
         # Create a queue to store the results
         results_queue = Queue()
         filename = utils.config['GENERAL']['Filename']
         # Extract the audio from the video file
-        # TODO Change env
-        audio_file, temp_file_path, temp_file_path_2 = utils.open_input_file(filename, 'S3')
+        audio_file, temp_file_path, temp_file_path_2 = utils.open_input_file(filename)
         audio_name = '{}.wav'.format(filename.split('.')[0])
 
         # Diarize and split the audio file
         speakers = drz.process(audio_file, audio_name)
         utils.save_to_s3('speakers.json', json.dumps(speakers).encode(), 'text', 'temp')
         __split_audio(audio_file, speakers, utils.config['GENERAL']['Language'])
-        '''
+
         # Define the processing threads
-        thread_process_text = threading.Thread(target=__analyze_text, args=(texts, results_queue,))
-        thread_process_audio = threading.Thread(target=__analyse_audio, args=(results_queue, ))
-        thread_process_video = threading.Thread(target=__analyse_video, args=(speakers, results_queue))
+        thread_process_text = threading.Thread(target=__analyze_text, args=(params, results_queue))
+        thread_process_audio = threading.Thread(target=__analyse_audio, args=(params, results_queue))
+        thread_process_video = threading.Thread(target=__analyse_video, args=(params, results_queue))
 
         # Start the threads
         utils.log.info('Starting emotions detection threads from text, audio and video')
@@ -158,17 +134,15 @@ def __process_all(queue: Queue) -> None:
             elif thread_id == 'emotions_from_audio':
                 audio_results = result
 
-        utils.merge_results(evaluations, text_results, video_results, audio_results)
-    '''
+        if text_results and video_results and audio_results:
+            utils.merge_results()
+
         result = (True, None)
     except Exception as e:
         result = (False, e)
 
-    # TODO uncomment block
-    '''
     finally:
         utils.delete_temp_files([temp_file_path, temp_file_path_2])
-    '''
     queue.put(result)
 
 
@@ -182,7 +156,7 @@ def process(session_id: int, interview_id: int):
         utils.log.info("Program started => Session: {} | Interview: {}".format(session_id, interview_id))
 
         # Start the process function in a separate thread
-        main_thread = threading.Thread(target=__process_all, args=(main_queue, ))
+        main_thread = threading.Thread(target=__process_all, args=(session_id, interview_id, main_queue, ))
         main_thread.start()
 
         # Create an indeterminate progress bar

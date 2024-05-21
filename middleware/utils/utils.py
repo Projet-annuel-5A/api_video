@@ -151,7 +151,12 @@ class Utils:
         for file in files:
             if os.path.exists(file):
                 os.remove(file)
-        # shutil.rmtree(self.temp_folder)
+        s3_temp_path = '{}/temp'.format(self.output_s3_folder)
+        for file in self.supabase_connection.list(s3_temp_path):
+            filepath = '{}/{}'.format(s3_temp_path, file['name'])
+            self.supabase_connection.remove(filepath)
+        self.supabase_connection.remove(s3_temp_path)
+
 
     def end_logs(self) -> None:
         log_handlers = logging.getLogger('mainLog').handlers[:]
@@ -266,28 +271,16 @@ class Utils:
 
         return audio_tensor
 
-    def merge_results(self,
-                      evaluations: pd.DataFrame,
-                      text_results: pd.DataFrame,
-                      video_results: pd.DataFrame,
-                      audio_results: pd.DataFrame) -> None:
-        self.log.info(
-            'Merging results from text, audio and video processing for speaker {}'.format(self.current_speaker))
-        evaluations = pd.concat([evaluations, text_results], ignore_index=True)
+    def merge_results(self) -> None:
+        self.log.info('Merging results from text, audio and video processing')
 
-        for index, row in video_results.iterrows():
-            # Find the corresponding row in evaluations based on matching values of columns speaker and file
-            mask = (evaluations['speaker'] == row['speaker']) & (evaluations['file'] == row['file'])
-            # Update values of column video_emotions in evaluations with corresponding values from video_results
-            evaluations.loc[mask, 'video_emotions'] = (evaluations.loc[mask, 'video_emotions'].
-                                                       apply(lambda x: row['video_emotions']))
+        text_results = self.__read_df_from_s3('text_emotions')
+        audio_results = self.__read_df_from_s3('audio_emotions')
+        video_results = self.__read_df_from_s3('video_emotions')
 
-        for index, row in audio_results.iterrows():
-            # Find the corresponding row in evaluations based on matching values of columns speaker and file
-            mask = (evaluations['speaker'] == row['speaker']) & (evaluations['file'] == row['file'])
-            # Update values of column audio_emotions in evaluations with corresponding values from audio_results
-            evaluations.loc[mask, 'audio_emotions'] = (evaluations.loc[mask, 'audio_emotions'].
-                                                       apply(lambda x: row['audio_emotions']))
+        # Merge the results on 'speaker' and 'part'
+        results = pd.merge(text_results, audio_results, on=['speaker', 'part'], how='inner')
+        results = pd.merge(results, video_results, on=['speaker', 'part'], how='inner')
 
         # Save the results file to S3
         filename = 'results.h5'
@@ -300,7 +293,7 @@ class Utils:
                     store.put('text', text_results)
                     store.put('video', video_results)
                     store.put('audio', audio_results)
-                    store.put('all', evaluations)
+                    store.put('all', results)
 
                 with open(temp_file_path, 'rb') as f:
                     try:
@@ -318,43 +311,43 @@ class Utils:
 
         self.log.info('Results merged successfully')
 
-    def open_input_file(self, videoname: str, env: str) -> Tuple[AudioSegment, str, str] | None:
-        if env == 'S3':
-            s3_path = '{}/{}/raw/{}'.format(self.session_id, self.interview_id, videoname)
-            try:
-                video_bytes = self.supabase_connection.download(s3_path)
-                self.log.info('Getting file {} from the S3 bucket'.format(videoname))
-                # Create a temporary file
-                with tempfile.NamedTemporaryFile(suffix='.mp4', delete=False) as temp_file:
-                    temp_file_path = temp_file.name
-                    try:
-                        # Write the video_bytes to the temporary file
-                        temp_file.write(video_bytes)
-                        # Ensure data is written to disk
-                        temp_file.flush()
-                        self.log.info('Starting audio extraction from video file')
-                        # Open the video from the temporary file and extract the audio
-                        audio = VideoFileClip(temp_file_path).audio
-                        self.log.info('Audio extraction finished')
+    def open_input_file(self, videoname: str) -> Tuple[AudioSegment, str, str] | None:
+        # if env == 'S3':
+        s3_path = '{}/{}/raw/{}'.format(self.session_id, self.interview_id, videoname)
+        try:
+            video_bytes = self.supabase_connection.download(s3_path)
+            self.log.info('Getting file {} from the S3 bucket'.format(videoname))
+            # Create a temporary file
+            with tempfile.NamedTemporaryFile(suffix='.mp4', delete=False) as temp_file:
+                temp_file_path = temp_file.name
+                try:
+                    # Write the video_bytes to the temporary file
+                    temp_file.write(video_bytes)
+                    # Ensure data is written to disk
+                    temp_file.flush()
+                    self.log.info('Starting audio extraction from video file')
+                    # Open the video from the temporary file and extract the audio
+                    audio = VideoFileClip(temp_file_path).audio
+                    self.log.info('Audio extraction finished')
 
-                        with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as temp_file_2:
-                            temp_file_path_2 = temp_file_2.name
-                            try:
-                                # Write the AudioFileClip to the temporary file
-                                audio.write_audiofile(temp_file_path_2, codec='pcm_s16le')
+                    with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as temp_file_2:
+                        temp_file_path_2 = temp_file_2.name
+                        try:
+                            # Write the AudioFileClip to the temporary file
+                            audio.write_audiofile(temp_file_path_2, codec='pcm_s16le')
 
-                                # Load the temporary file with pydub
-                                audio_segment = AudioSegment.from_file(temp_file_path_2, format='wav')
-                            finally:
-                                temp_file_2.close()
-                    finally:
-                        temp_file.close()
-            except Exception as e:
-                message = ('Error downloading the file {} from the S3 bucket. '.
-                           format(videoname), str(e))
-                self.log.error(message)
-                sys.exit(1)
-            return audio_segment, temp_file_path, temp_file_path_2
+                            # Load the temporary file with pydub
+                            audio_segment = AudioSegment.from_file(temp_file_path_2, format='wav')
+                        finally:
+                            temp_file_2.close()
+                finally:
+                    temp_file.close()
+        except Exception as e:
+            message = ('Error downloading the file {} from the S3 bucket. '.
+                       format(videoname), str(e))
+            self.log.error(message)
+            sys.exit(1)
+        '''
         elif env == 'Local':
             filename = self.config['GENERAL']['Filename']
             base_folder = os.path.join(os.path.dirname(__file__),
@@ -377,9 +370,11 @@ class Utils:
                 finally:
                     temp_file_2.close()
             self.log.info('Audio extraction finished')
-            return audio_segment, filename, temp_file_path_2
+            temp_file_path = filename
         else:
             return None
+        '''
+        return audio_segment, temp_file_path, temp_file_path_2
 
     def update_bool_db(self, interview_id: str, champ_name: str) -> None:
         self.log.info('Updating {} in the database'.format(champ_name))
@@ -410,3 +405,17 @@ class Utils:
                 temp_file.close()
                 if os.path.exists(temp_file_path):
                     os.remove(temp_file_path)
+
+    def __read_df_from_s3(self, filename) -> pd.DataFrame:
+        path = '{}/temp/{}.tmp'.format(self.output_s3_folder, filename)
+        with tempfile.NamedTemporaryFile(suffix='.h5', delete=False) as temp_file:
+            temp_file_path = temp_file.name
+            try:
+                res = self.supabase_connection.download(path)
+                temp_file.write(res)
+                df = pd.read_hdf(temp_file_path, key='data', index_col=None)
+            finally:
+                temp_file.close()
+                if os.path.exists(temp_file_path):
+                    os.remove(temp_file_path)
+        return df
