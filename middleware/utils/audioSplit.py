@@ -41,8 +41,6 @@ class AudioSplit:
         all_texts = pd.DataFrame(columns=['part', 'start', 'end', 'text'])
 
         for i in range(len(parts)):
-            part_name = 'part_{:05d}'.format(i)
-
             start = parts[i][0] * 1000
             end = parts[i][1] * 1000
             split_audio = audiofile[start:end+500]

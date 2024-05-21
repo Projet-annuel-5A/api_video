@@ -1,5 +1,3 @@
-import os
-import json
 import uvicorn
 from typing import List
 from pydantic import BaseModel

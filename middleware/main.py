@@ -1,4 +1,3 @@
-import os
 import time
 import json
 import uvicorn
@@ -6,39 +5,21 @@ import requests
 import threading
 import pandas as pd
 from tqdm import tqdm
+from typing import Dict
 from queue import Queue
 from .utils.utils import Utils
 from dotenv import load_dotenv
 from pydub import AudioSegment
-from typing import Dict, Tuple, List
 from .utils.diarizator import Diarizator
 from .utils.audioSplit import AudioSplit
 from fastapi import FastAPI, HTTPException
-# from model_text.textEmotions import TextEmotions
-# from model_audio.audioEmotions import AudioEmotions
-# from model_video.videoEmotions import VideoEmotions
 
+global utils
 
 app = FastAPI()
 
 # Load environment variables from .env file
 load_dotenv()
-
-
-def __init_all(session_id: int, interview_id: int) -> None:
-    global utils
-    global asp
-    global drz
-    # global ate
-    # global tte
-    # global vte
-
-    utils = Utils(session_id, interview_id)
-    asp = AudioSplit()
-    # ate = AudioEmotions(session_id, interview_id, speaker_name)
-    drz = Diarizator()
-    # tte = TextEmotions(session_id, interview_id, speaker_name)
-    # vte = VideoEmotions(session_id, interview_id, speaker_name)
 
 
 def __analyze_text(params: Dict, queue: Queue) -> None:
@@ -51,7 +32,6 @@ def __analyze_text(params: Dict, queue: Queue) -> None:
     else:
         utils.log.error("Error:", response.status_code)
         queue.put(('emotions_from_text', False))
-
 
 
 def __analyse_video(params: Dict, queue: Queue) -> None:
@@ -79,6 +59,7 @@ def __analyse_audio(params: Dict, queue: Queue) -> None:
 
 
 def __split_audio(_audiofile: AudioSegment, _speakers: Dict, lang: str = 'french') -> None:
+    asp = AudioSplit()
     utils.log.info('Starting split audio')
     texts = asp.process(_audiofile, _speakers, lang)
     # Save texts to S3
@@ -88,6 +69,7 @@ def __split_audio(_audiofile: AudioSegment, _speakers: Dict, lang: str = 'french
 
 
 def __process_all(session_id: int, interview_id: int, queue: Queue) -> None:
+    drz = Diarizator()
     text_results = pd.DataFrame(columns=['speaker', 'file', 'text', 'text_emotions'])
     video_results = pd.DataFrame(columns=['speaker', 'file', 'video_emotions'])
     audio_results = pd.DataFrame(columns=['speaker', 'file', 'audio_emotions'])
@@ -150,7 +132,7 @@ def process(session_id: int, interview_id: int):
     try:
         print('Program started')
 
-        __init_all(session_id, interview_id)
+        utils = Utils(session_id, interview_id)
         main_queue = Queue()
 
         utils.log.info("Program started => Session: {} | Interview: {}".format(session_id, interview_id))

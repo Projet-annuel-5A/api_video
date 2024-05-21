@@ -5,8 +5,8 @@ import tempfile
 import numpy as np
 import pandas as pd
 import torch.nn as nn
+from typing import Dict
 from utils.utils import Utils
-from typing import List, Dict, Tuple
 
 
 class VideoEmotions:

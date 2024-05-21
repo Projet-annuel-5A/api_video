@@ -157,7 +157,6 @@ class Utils:
             self.supabase_connection.remove(filepath)
         self.supabase_connection.remove(s3_temp_path)
 
-
     def end_logs(self) -> None:
         log_handlers = logging.getLogger('mainLog').handlers[:]
         for handler in log_handlers:

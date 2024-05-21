@@ -1,5 +1,4 @@
 import torch
-import tempfile
 import pandas as pd
 from typing import Dict
 from utils.utils import Utils

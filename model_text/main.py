@@ -1,6 +1,4 @@
-import os
 import uvicorn
-import pandas as pd
 from typing import List
 from pydantic import BaseModel
 from dotenv import load_dotenv
