@@ -24,6 +24,7 @@ class VideoEmotions:
 
         m = nn.Softmax(dim=0)
         values = m(logits[0])
+        print('Values:', values)
 
         w_values = np.zeros(len(values))
         for i in range(len(w_values)):
@@ -33,20 +34,25 @@ class VideoEmotions:
         # Convert to percentage
         total = np.sum(w_values)
         w_values = w_values * 100 / total
+        print('W_values:', w_values)
 
         output = dict(zip(self.utils.vte_model.config.id2label.values(), w_values))
+        print('Output:', output)
 
         sorted_values = {k: v for k, v in sorted(output.items(), key=lambda x: x[1], reverse=True)}
+        print('Sorted values:', sorted_values)
 
         return sorted_values
 
     def process(self, _speakers: Dict) -> pd.DataFrame:
         res = pd.DataFrame(columns=['speaker', 'part', 'video_emotions'])
+        print('Processing video emotions')
 
         s3_path = '{}/{}/raw/{}'.format(self.utils.session_id,
                                         self.utils.interview_id,
                                         self.utils.config['GENERAL']['Filename'])
         video_bytes = self.utils.supabase_connection.download(s3_path)
+        print('Video bytes downloaded')
 
         with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as temp_file:
             temp_file_path = temp_file.name
@@ -62,19 +68,24 @@ class VideoEmotions:
                 interval = int(fps) * timing
 
                 for current_speaker in _speakers.keys():
+                    print('Processing speaker:', current_speaker)
                     parts = _speakers[current_speaker]
 
                     for i in range(len(parts)):
+                        print('Processing part ', i)
                         video_emotions = {}
                         start_time = parts[i][0]
                         end_time = parts[i][1]
+                        print('Start time: ', start_time, 'End time: ', end_time)
 
                         # Calculate frame indices for starting and ending times
                         start_frame = int(start_time * fps)
                         end_frame = int(end_time * fps)
+                        print('Start frame: ', start_frame, 'End frame: ', end_frame)
 
                         # Set starting frame
                         clip.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
+                        print('Starting frame set to frame: ', start_frame)
 
                         # Read the video frame by frame and send respective frames to prediction
                         frame_count = 0
@@ -89,6 +100,7 @@ class VideoEmotions:
 
                             # Detect emotions from the frame if it's a multiple of the interval
                             if frame_count % interval == 0:
+                                print('Processing frame: ', frame_count)
                                 video_emotions[image_name] = self.__predict(frame)
                                 image_count += 1
                                 last_frame = None
@@ -99,6 +111,7 @@ class VideoEmotions:
                             # Save the last frame
                             if last_frame is not None:
                                 video_emotions[image_name] = self.__predict(last_frame)
+                                print('Processing frame: ', frame_count)
 
                         res.loc[len(res)] = [int(current_speaker.split('_')[1]),
                                              i,
@@ -106,8 +119,10 @@ class VideoEmotions:
 
                 # Release the video capture object
                 clip.release()
+                print('Video capture object released')
             finally:
                 temp_file.close()
+                print('Temporary file closed')
                 # Clean up the temporary file
                 if os.path.exists(temp_file_path):
                     os.remove(temp_file_path)

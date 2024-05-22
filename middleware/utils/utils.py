@@ -271,6 +271,9 @@ class Utils:
 
     def merge_results(self, results: List[Dict[str, bool]]) -> None:
         self.log.info('Merging results from text, audio and video processing')
+        self.log.info('Size of results: {}'.format(len(results)))
+        self.log.info('Results: ')
+        self.log.info(results)
 
         text = [d['text'] for d in results if 'text' in d][0]
         audio = [d['audio'] for d in results if 'audio' in d][0]
