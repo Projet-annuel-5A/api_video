@@ -74,7 +74,7 @@ class Process:
         drz = Diarizator()
         temp_files = []
 
-        results = []
+        all_results = []
         try:
             filename = self.utils.config['GENERAL']['Filename']
             # Extract the audio from the video file
@@ -96,17 +96,20 @@ class Process:
                 audio_results = executor.submit(self.__analyse_audio)
                 video_results = executor.submit(self.__analyse_video)
 
-            # Wait for all methods to complete and get their results
-            results = [analysis.result() for analysis in concurrent.futures.as_completed([text_results,
-                                                                                          audio_results,
-                                                                                          video_results])]
+            for future in concurrent.futures.as_completed([text_results, audio_results, video_results]):
+                try:
+                    result = future.result()
+                    all_results.append(result)
+                except Exception as e:
+                    self.utils.log.error('An error occurred: {}'.format(e))
             self.utils.log.info('Emotions detection threads from text, audio and video have finished')
 
             result = (True, None)
         except Exception as e:
             result = (False, e)
         finally:
-            self.utils.merge_results(results)
+
+            self.utils.merge_results(all_results)
             self.utils.delete_temp_files(temp_files)
         queue.put(result)
 
