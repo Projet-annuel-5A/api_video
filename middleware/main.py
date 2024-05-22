@@ -186,6 +186,13 @@ async def delete_all(session_id: int, interview_id: int):
 
         # Delete results in DB
         utils.supabase.table('results').delete().eq('interview_id', interview_id).execute()
+
+        # Update fields to false
+        utils.update_bool_db('text_ok', False)
+        utils.update_bool_db('video_ok', False)
+        utils.update_bool_db('audio_ok', False)
+        utils.update_bool_db('diarization_ok', False)
+
         return {"status": "ok"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
