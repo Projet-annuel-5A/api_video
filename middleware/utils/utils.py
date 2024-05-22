@@ -9,8 +9,8 @@ import configparser
 import pandas as pd
 from datetime import datetime
 from pydub import AudioSegment
-from typing import Tuple, Any, List
 from moviepy.editor import VideoFileClip
+from typing import Tuple, Any, List, Dict
 from supabase import create_client, Client
 warnings.filterwarnings("ignore", category=UserWarning)
 from pyannote.audio import Pipeline as AudioPipeline
@@ -78,6 +78,7 @@ class Utils:
 
             self.supabase_client = self.__check_supabase_connection()
             self.supabase_connection = self.__connect_to_bucket()
+            self.supabase: Client = create_client(self.config['SUPABASE']['Url'], os.environ.get('SUPABASE_KEY'))
 
             (self.diarization_pipeline,
              self.stt_model,
@@ -268,45 +269,78 @@ class Utils:
 
         return audio_tensor
 
-    def merge_results(self) -> None:
+    def merge_results(self, results: List[Dict[str, bool]]) -> None:
         self.log.info('Merging results from text, audio and video processing')
 
-        text_results = self.__read_df_from_s3('text_emotions')
-        audio_results = self.__read_df_from_s3('audio_emotions')
-        video_results = self.__read_df_from_s3('video_emotions')
+        text = [d['text'] for d in results if 'text' in d][0]
+        audio = [d['audio'] for d in results if 'audio' in d][0]
+        video = [d['video'] for d in results if 'video' in d][0]
 
-        # Merge the results on 'speaker' and 'part'
-        results = pd.merge(text_results, audio_results, on=['speaker', 'part'], how='inner')
-        results = pd.merge(results, video_results, on=['speaker', 'part'], how='inner')
+        valid_results = []
+        if text:
+            text_results = self.__read_df_from_s3('text_emotions')
+            valid_results.append(text_results)
+        if audio:
+            audio_results = self.__read_df_from_s3('audio_emotions')
+            valid_results.append(audio_results)
+        if video:
+            video_results = self.__read_df_from_s3('video_emotions')
+            valid_results.append(video_results)
+
+        # Check if there are results to merge
+        results = pd.DataFrame(columns=['speaker',
+                                        'part',
+                                        'start',
+                                        'end',
+                                        'text',
+                                        'text_emotions',
+                                        'audio_emotions',
+                                        'video_emotions']
+                               )
+        if len(valid_results) == 1:
+            results = pd.concat([results, valid_results[0]], ignore_index=True)
+        elif len(valid_results) > 1:
+            results = pd.concat([results, pd.merge(valid_results[0], valid_results[1],
+                                                   on=['speaker', 'part'],
+                                                   how='inner')], ignore_index=True)
+        if len(valid_results) > 2:
+            results = pd.merge(results, valid_results[2], on=['speaker', 'part'], how='inner')
 
         # Save the results file to S3
-        filename = 'results.h5'
-        s3_path = '{}/results/{}'.format(self.output_s3_folder, filename)
-        with tempfile.NamedTemporaryFile(suffix='.h5', delete=False) as temp_file:
-            temp_file_path = temp_file.name
-            try:
-                # Write the file to the temporary file
-                with pd.HDFStore(temp_file_path) as store:
-                    store.put('text', text_results)
-                    store.put('video', video_results)
-                    store.put('audio', audio_results)
-                    store.put('all', results)
+        if len(valid_results) > 0:
+            filename = 'results.h5'
+            s3_path = '{}/results/{}'.format(self.output_s3_folder, filename)
+            with tempfile.NamedTemporaryFile(suffix='.h5', delete=False) as temp_file:
+                temp_file_path = temp_file.name
+                try:
+                    # Write the file to the temporary file
+                    with pd.HDFStore(temp_file_path) as store:
+                        if text:
+                            store.put('text', text_results)
+                        if video:
+                            store.put('video', video_results)
+                        if audio:
+                            store.put('audio', audio_results)
+                        store.put('all', results)
 
-                with open(temp_file_path, 'rb') as f:
-                    try:
-                        self.supabase_connection.upload(file=f, path=s3_path,
-                                                        file_options={'content-type': 'application/octet-stream'})
-                        self.log.info('File {} uploaded to S3 bucket at {}'.format(filename, s3_path))
-                    except Exception as e:
-                        message = (
-                            'Error uploading the file {} to the S3 bucket. '.format(filename), str(e))
-                        self.log.info(message)
-            finally:
-                temp_file.close()
-                if os.path.exists(temp_file_path):
-                    os.remove(temp_file_path)
+                    with open(temp_file_path, 'rb') as f:
+                        try:
+                            self.supabase_connection.upload(file=f, path=s3_path,
+                                                            file_options={'content-type': 'application/octet-stream'})
+                            self.log.info('File {} uploaded to S3 bucket at {}'.format(filename, s3_path))
+                        except Exception as e:
+                            message = (
+                                'Error uploading the file {} to the S3 bucket. '.format(filename), str(e))
+                            self.log.info(message)
+                finally:
+                    temp_file.close()
+                    if os.path.exists(temp_file_path):
+                        os.remove(temp_file_path)
 
-        self.log.info('Results merged successfully')
+            # Save the results to the database
+            self.save_results_to_bd(results)
+
+        self.log.info('Results merged and saved successfully')
 
     def open_input_file(self, videoname: str) -> Tuple[AudioSegment, str, str] | None:
         # if env == 'S3':
@@ -373,11 +407,11 @@ class Utils:
         '''
         return audio_segment, temp_file_path, temp_file_path_2
 
-    def update_bool_db(self, interview_id: str, champ_name: str) -> None:
-        self.log.info('Updating {} in the database'.format(champ_name))
+    def update_bool_db(self, champ_name: str, value: bool) -> None:
+        self.log.info('Updating {} to {} in the database'.format(champ_name, value))
         try:
-            self.supabase_client.table('interviews').update({champ_name: True}).eq('id', interview_id)
-            self.log.info('{} updated successfully'.format(champ_name))
+            self.supabase.table('interviews').update({champ_name: value}).eq('id', self.interview_id).execute()
+            self.log.info('{} updated successfully to {}'.format(champ_name, value))
         except Exception as e:
             message = ('Error updating {} in the database'.format(champ_name), str(e))
             self.log.error(message)
@@ -416,3 +450,19 @@ class Utils:
                 if os.path.exists(temp_file_path):
                     os.remove(temp_file_path)
         return df
+
+    def save_results_to_bd(self, results: pd.DataFrame) -> None:
+        self.log.info('Saving results to the supabase database')
+        try:
+            response = self.supabase.table('interviews').select('user_id').eq('id', self.interview_id).execute()
+            user_id = response['data'][0]['user_id']
+
+            results['interview_id'] = self.interview_id
+            results['user_id'] = user_id
+            results = results.fillna('')
+
+            data_to_insert = results.to_dict(orient='records')
+            response = self.supabase.table('results').insert(data_to_insert).execute()
+            self.log.info('{} lines saved to the database successfully'. format(len(response.data)))
+        except Exception as e:
+            self.log.error('Error saving results to the database', str(e))
