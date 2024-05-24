@@ -100,7 +100,6 @@ class VideoEmotions:
                         frame_count = 0
                         image_count = 0
                         while clip.isOpened() and frame_count <= (end_frame - start_frame):
-                            image_name = 'image_{:05d}'.format(image_count)
                             ret, frame = clip.read()
 
                             # If there are no more frames, break the loop
@@ -108,17 +107,20 @@ class VideoEmotions:
                                 break
 
                             # Detect emotions from the frame if it's a multiple of the interval
-                            if frame_count % interval == 0:
-                                video_emotions[image_name] = self.__predict(frame)
+                            if frame_count == 0 or frame_count % interval == 0:
+                                image_name = 'image_{:05d}'.format(image_count)
                                 image_count += 1
-                                last_frame = None
-                            else:
-                                last_frame = frame
-                            frame_count += 1
+
+                                video_emotions[image_name] = self.__predict(frame)
 
                             # Save the last frame
-                            if last_frame is not None:
+                            elif start_frame + frame_count == end_frame:
+                                image_name = 'image_{:05d}'.format(image_count)
+                                image_count += 1
+
                                 video_emotions[image_name] = self.__predict(frame)
+
+                            frame_count += 1
 
                         res.loc[len(res)] = [int(current_speaker.split('_')[1]),
                                              i,
@@ -137,4 +139,6 @@ class VideoEmotions:
                     os.remove(temp_file_path)
 
         self.utils.log.info('Emotions extraction from video have finished')
+        print('Emotions extraction from video have finished')
+        print(res)
         return res
