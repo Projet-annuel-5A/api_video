@@ -44,7 +44,6 @@ class AudioSplit:
             start = parts[i][0] * 1000
             end = parts[i][1] * 1000
             split_audio = audiofile[start:end+500]
-
             self.utils.save_to_s3('part_{:05d}.wav'.format(i), split_audio.export(format='wav').read(),
                                   'audio', current_speaker)
 
@@ -60,9 +59,10 @@ class AudioSplit:
     def process(self, audiofile: AudioSegment, speakers: Dict, lang: str) -> pd.DataFrame:
         all_texts = pd.DataFrame(columns=['speaker', 'part', 'start', 'end', 'text'])
         for speaker, lines in zip(speakers.keys(), speakers.values()):
+            self.utils.log.info('Processing speaker {}'.format(speaker))
             texts = self.__split_to_text(audiofile, lines, speaker, lang)
             texts.insert(0, 'speaker', int(speaker.split('_')[1]))
             all_texts = pd.concat([all_texts, texts], ignore_index=True)
 
-        self.utils.log.info('Audio file splitted succesfully')
+        self.utils.log.info('Audio file split successfully')
         return all_texts

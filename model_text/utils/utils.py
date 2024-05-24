@@ -169,6 +169,10 @@ class Utils:
                 res = self.supabase_connection.download(path)
                 temp_file.write(res)
                 df = pd.read_hdf(temp_file_path, key='data', index_col=None)
+            except Exception as e:
+                message = ('Error reading the file from the S3 bucket. ', str(e))
+                self.log.error(message)
+                print(message)
             finally:
                 temp_file.close()
                 if os.path.exists(temp_file_path):
@@ -191,6 +195,10 @@ class Utils:
                         message = (
                             'Error uploading the file to the S3 bucket. ', str(e))
                         self.log.info(message)
+            except Exception as e:
+                message = ('Error saving the dataframe {} to the S3 bucket. '.format(filename), str(e))
+                self.log.info(message)
+                print(message)
             finally:
                 temp_file.close()
                 if os.path.exists(temp_file_path):

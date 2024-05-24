@@ -177,6 +177,10 @@ class Utils:
                         message = (
                             'Error uploading the file to the S3 bucket. ', str(e))
                         self.log.info(message)
+            except Exception as e:
+                message = ('Error saving the dataframe {} to the S3 bucket. '.format(filename), str(e))
+                self.log.info(message)
+                print(message)
             finally:
                 temp_file.close()
                 if os.path.exists(temp_file_path):

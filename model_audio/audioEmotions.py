@@ -2,7 +2,6 @@ import os
 import torch
 import tempfile
 import torchaudio
-import numpy as np
 from utils.utils import Utils
 from dotenv import load_dotenv
 import torch.nn.functional as f
@@ -15,17 +14,19 @@ class AudioEmotions:
         load_dotenv()
         self.utils = Utils(session_id, interview_id)
 
-    def __speech_file_to_array_fn(self, path: str, sampling_rate: int) -> np.ndarray:
-        speech_array, _sampling_rate = torchaudio.load(path)
-        resampler = torchaudio.transforms.Resample(_sampling_rate, sampling_rate)
-        speech = resampler(speech_array).squeeze().numpy()
-
-        return speech
-
-    def __predict(self, filename: str, path: str) -> Dict[str, float]:
+    def __download_and_predict(self, filename: str, s3_path: str) -> Dict[str, float]:
         self.utils.log.info('Recognizing emotions from audio file {}'.format(filename))
 
-        speech = self.__speech_file_to_array_fn(path, self.utils.ate_sampling_rate)
+        downloaded_file = self.utils.supabase_connection.download('{}/{}'.format(s3_path, filename))
+        with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as temp_file:
+            temp_file_path = temp_file.name
+            temp_file.write(downloaded_file)
+
+        speech_array, _sampling_rate = torchaudio.load(temp_file_path)
+
+        resampler = torchaudio.transforms.Resample(_sampling_rate, self.utils.ate_sampling_rate)
+        speech = resampler(speech_array).squeeze().numpy()
+
         inputs = self.utils.ate_feature_extractor(speech, sampling_rate=self.utils.ate_sampling_rate,
                                                   return_tensors="pt", padding=True)
         inputs = {key: inputs[key].to(self.utils.device) for key in inputs}
@@ -44,30 +45,24 @@ class AudioEmotions:
         # Sort the dictionary by values in descending order
         sorted_values = {k: v for k, v in sorted(values_dict.items(), key=lambda x: x[1], reverse=True)}
 
+        temp_file.close()
+        # Clean up the temporary file
+        if os.path.exists(temp_file_path):
+            os.remove(temp_file_path)
+
         return sorted_values
 
     def process_folder(self, current_speaker: str) -> Tuple[List, List]:
         all_files = list()
         all_emotions = list()
 
-        s3_path = '{}/{}/audioparts'.format(self.utils.output_s3_folder, current_speaker)
+        s3_path = '{}/{}'.format(self.utils.output_s3_folder, current_speaker)
         for file in self.utils.supabase_connection.list(s3_path):
             filename = file['name']
             if filename.split('.')[-1] == 'wav':
-                downloaded_file = self.utils.supabase_connection.download('{}/{}'.format(s3_path, filename))
-                with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as temp_file:
-                    temp_file_path = temp_file.name
 
-                    try:
-                        temp_file.write(downloaded_file)
-                        emotions = self.__predict(filename, temp_file_path)
-                    finally:
-                        temp_file.close()
-                        # Clean up the temporary file
-                        if os.path.exists(temp_file_path):
-                            os.remove(temp_file_path)
-
-            all_emotions.append(emotions)
-            part_number = int((filename.split('.')[0]).split('_')[-1])
-            all_files.append(part_number)
+                emotions = self.__download_and_predict(filename, s3_path)
+                all_emotions.append(emotions)
+                part_number = int((filename.split('.')[0]).split('_')[-1])
+                all_files.append(part_number)
         return all_files, all_emotions

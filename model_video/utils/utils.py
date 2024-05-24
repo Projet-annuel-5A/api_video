@@ -3,16 +3,12 @@ import sys
 import json
 import torch
 import logging
-import warnings
 import tempfile
 import configparser
 import pandas as pd
 from datetime import datetime
 from typing import Tuple, Any, Dict, List
 from supabase import create_client, Client
-warnings.filterwarnings("ignore", category=UserWarning)
-from transformers import (AutoImageProcessor,
-                          AutoModelForImageClassification)
 
 
 class BufferingHandler(logging.Handler):
@@ -59,9 +55,6 @@ class Utils:
             self.supabase_client = self.__check_supabase_connection()
             self.supabase_connection = self.__connect_to_bucket()
 
-            (self.vte_model,
-             self.vte_processor) = self.__init_models()
-
             self.__initialized = True
 
     def __init_logs(self) -> logging.Logger:
@@ -92,17 +85,6 @@ class Utils:
                 print("No file 'videoConfig.ini' is present, the program can not continue")
                 sys.exit()
         return config
-
-    def __init_models(self) -> Tuple:
-        # Video to emotions
-        vte_model_id = self.config['VIDEOEMOTION']['ModelId']
-        vte_model = AutoModelForImageClassification.from_pretrained(vte_model_id, output_attentions=True)
-        vte_model.to(self.device)
-        vte_processor = AutoImageProcessor.from_pretrained(vte_model_id, output_attentions=True)
-        self.log.info('Video-to-emotions model {} loaded in {}'.format(vte_model_id, self.device))
-
-        return (vte_model,
-                vte_processor)
 
     def __check_supabase_connection(self) -> Client:
         try:
@@ -181,6 +163,10 @@ class Utils:
                         message = (
                             'Error uploading the file to the S3 bucket. ', str(e))
                         self.log.info(message)
+            except Exception as e:
+                message = ('Error saving the dataframe {} to the S3 bucket. '.format(filename), str(e))
+                self.log.info(message)
+                print(message)
             finally:
                 temp_file.close()
                 if os.path.exists(temp_file_path):

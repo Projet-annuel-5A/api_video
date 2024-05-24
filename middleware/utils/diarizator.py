@@ -12,24 +12,7 @@ class Diarizator:
     def __split_diarization(self, diarization: Annotation) -> Dict[str, List[Tuple[float, float]]]:
         self.utils.log.info('Start splitting diarization')
         speakers_dict = {}
-        '''
-        for turn, _, speaker in diarization.itertracks(yield_label=True):
-            speaker = 'speaker_{:03d}'.format(int(speaker.split('_')[1]))
-            if current_speaker == '':
-                current_speaker = speaker
-                values = (turn.start, turn.end)
-            elif speaker == current_speaker:
-                values = (values[0], turn.end)
-            else:
-                if speakers_dict.get(current_speaker) is None:
-                    speakers_dict[current_speaker] = list()
-                speakers_dict[current_speaker].append(values)
-                current_speaker = speaker
-                values = (turn.start, turn.end)
-        if speakers_dict.get(current_speaker) is None:
-            speakers_dict[current_speaker] = list()
-        speakers_dict[current_speaker].append(values)
-        '''
+
         for turn, _, speaker in diarization.itertracks(yield_label=True):
             current_speaker = 'speaker_{:03d}'.format(int(speaker.split('_')[1]))
             values = (turn.start, turn.end)
@@ -39,13 +22,6 @@ class Diarizator:
 
         self.utils.log.info('Split completed successfully')
         return speakers_dict
-
-    '''
-    def __diarization_to_file(self, diarization: Annotation, audiofile: str) -> None:
-        filename = os.path.join(self.utils.output_folder, '{}.rttm'.format(audiofile.split('.')[0]))
-        with open(filename, "w") as rttm:
-            diarization.write_rttm(rttm)
-    '''
 
     def __diarize(self, waveform: torch.Tensor, sample_rate: int) -> Annotation:
         pipeline = self.utils.diarization_pipeline
@@ -63,5 +39,6 @@ class Diarizator:
         diarization_str = diarization.to_rttm().encode()
         self.utils.save_to_s3('{}.rttm'.format(filename.split('.')[0]), diarization_str, 'text')
         speakers = self.__split_diarization(diarization)
-        self.utils.log.info('File {} diarizated succesfully'.format(filename))
+        self.utils.update_bool_db('diarization_ok', True)
+        self.utils.log.info('Diarization of the file {} completed successfully'.format(filename))
         return speakers
