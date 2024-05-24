@@ -8,14 +8,29 @@ from typing import Dict
 from queue import Queue
 import concurrent.futures
 from utils.utils import Utils
+from pydantic import BaseModel
 from dotenv import load_dotenv
 from pydub import AudioSegment
 from utils.diarizator import Diarizator
 from utils.audioSplit import AudioSplit
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+
 
 app = FastAPI()
 
+origins = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,  
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 class Process:
     def __init__(self, session_id: int, interview_id: int):
@@ -186,8 +201,15 @@ def health():
     return {"status": "ok"}
 
 
+class PredictRequest(BaseModel):
+    session_id: int
+    interview_id: int
+
 @app.post("/predict")
-async def predict(session_id: int, interview_id: int):
+async def predict(request: PredictRequest):
+    session_id = request.session_id
+    interview_id = request.interview_id
+
     process = Process(session_id, interview_id)
     process.start_process()
     return {"status": "ok"}
