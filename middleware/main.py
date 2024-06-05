@@ -32,6 +32,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
 class Process:
     def __init__(self, session_id: int, interview_id: int):
         load_dotenv()
@@ -204,6 +205,7 @@ def health():
 class PredictRequest(BaseModel):
     session_id: int
     interview_id: int
+
 
 @app.post("/predict")
 async def predict(request: PredictRequest):
