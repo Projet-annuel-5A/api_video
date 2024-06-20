@@ -1,18 +1,13 @@
 import os
 import sys
 import json
-import torch
 import logging
-import warnings
 import tempfile
 import configparser
 import pandas as pd
+from typing import Any, List
 from datetime import datetime
-from typing import Tuple, Any, List
 from supabase import create_client, Client
-warnings.filterwarnings("ignore", category=UserWarning)
-from transformers import (AutoModelForAudioClassification,
-                          Wav2Vec2FeatureExtractor)
 
 
 class BufferingHandler(logging.Handler):
@@ -47,7 +42,6 @@ class Utils:
 
             self.session_id = session_id
             self.interview_id = interview_id
-            self.device = "cuda:0" if torch.cuda.is_available() else "cpu"
 
             # S3 Folders
             self.output_s3_folder = '{}/{}/output'.format(self.session_id, self.interview_id)
@@ -59,11 +53,10 @@ class Utils:
             self.supabase_client = self.__check_supabase_connection()
             self.supabase_connection = self.__connect_to_bucket()
 
-            (self.ate_model,
-             self.ate_feature_extractor,
-             self.ate_sampling_rate) = self.__init_models()
-
             self.__initialized = True
+
+    def __del__(self):
+        self.__initialized = False
 
     def __init_logs(self) -> logging.Logger:
         logger = logging.getLogger('audioLog')
@@ -89,23 +82,10 @@ class Utils:
                 path = os.path.join(base_path, 'config', 'audioConfig.ini')
                 with open(path) as f:
                     config.read_file(f)
-            except IOError:
+            except IOError as e:
                 print("No file 'audioConfig.ini' is present, the program can not continue")
-                sys.exit()
+                raise e
         return config
-
-    def __init_models(self) -> Tuple:
-        # Audio to emotions
-        ate_model_id = self.config['AUDIOEMOTIONS']['ModelId']
-        ate_model = AutoModelForAudioClassification.from_pretrained(ate_model_id)
-        ate_model.to(self.device)
-        ate_feature_extractor = Wav2Vec2FeatureExtractor.from_pretrained(ate_model_id)
-        ate_sampling_rate = ate_feature_extractor.sampling_rate
-        self.log.info('Audio-to-emotions model {} loaded in {}'.format(ate_model_id, self.device))
-
-        return (ate_model,
-                ate_feature_extractor,
-                ate_sampling_rate)
 
     def __check_supabase_connection(self) -> Client:
         try:
@@ -142,7 +122,7 @@ class Utils:
             s3_path = '{}/{}/{}'.format(self.output_s3_folder,
                                         s3_subfolder,
                                         filename) if s3_subfolder else '{}/{}'.format(self.output_s3_folder, filename)
-            self.supabase_connection.upload(file=content, path=s3_path, file_options={"content-type": content_type})
+            self.supabase_connection.upload(file=content, path=s3_path, file_options={'content-type': content_type})
             self.log.info('File {} uploaded to S3 bucket at {}'.format(filename, s3_path))
             return True
         except Exception as e:

@@ -1,5 +1,6 @@
 import torch
 from .utils import Utils
+from .models import Models
 from pydub import AudioSegment
 from typing import Dict, List, Tuple
 from pyannote.core.annotation import Annotation
@@ -8,6 +9,7 @@ from pyannote.core.annotation import Annotation
 class Diarizator:
     def __init__(self) -> None:
         self.utils = Utils()
+        self.models = Models()
 
     def __split_diarization(self, diarization: Annotation) -> Dict[str, List[Tuple[float, float]]]:
         self.utils.log.info('Start splitting diarization')
@@ -24,7 +26,7 @@ class Diarizator:
         return speakers_dict
 
     def __diarize(self, waveform: torch.Tensor, sample_rate: int) -> Annotation:
-        pipeline = self.utils.diarization_pipeline
+        pipeline = self.models.diarization_pipeline
         diarization = pipeline({"waveform": waveform, "sample_rate": sample_rate}, num_speakers=2)
         self.utils.log.info('Diarization completed successfully')
         return diarization

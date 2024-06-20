@@ -7,6 +7,7 @@ from typing import Dict
 from deepface import DeepFace
 from utils.utils import Utils
 from dotenv import load_dotenv
+from utils.models import Models
 
 
 class VideoEmotions:
@@ -45,6 +46,7 @@ class VideoEmotions:
             cv2.imwrite(temp_file_path, image)
 
             try:
+                # ToDo: Replace library by the yolo model
                 objs = DeepFace.analyze(img_path=temp_file_path, actions=['emotion'])
                 results = objs[0]['emotion']
                 emotions = {k: v for k, v in sorted(results.items(), key=lambda x: x[1], reverse=True)}
@@ -140,5 +142,4 @@ class VideoEmotions:
 
         self.utils.log.info('Emotions extraction from video have finished')
         print('Emotions extraction from video have finished')
-        print(res)
         return res

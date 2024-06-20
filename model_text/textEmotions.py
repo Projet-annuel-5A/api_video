@@ -3,6 +3,7 @@ import pandas as pd
 from typing import Dict
 from utils.utils import Utils
 from dotenv import load_dotenv
+from utils.models import Models
 
 
 class TextEmotions:
@@ -10,12 +11,14 @@ class TextEmotions:
         # Load environment variables from .env file
         load_dotenv()
         self.utils = Utils(session_id, interview_id)
+        self.models = Models()
 
     def __process_text(self, text: str) -> Dict[str, float]:
-        inputs = self.utils.tte_tokenizer(text, return_tensors="pt")
+        inputs = self.models.tte_tokenizer(text, return_tensors="pt")
+        inputs = {k: v.to(self.models.device) for k, v in inputs.items()}
 
         with torch.no_grad():
-            logits = self.utils.tte_model(**inputs).logits
+            logits = self.models.tte_model(**inputs).logits
 
         # Get a list of the probabilities for each emotion
         values = torch.sigmoid(logits).squeeze(dim=0).tolist()
@@ -24,7 +27,7 @@ class TextEmotions:
         values = [round(num * 100, 5) for num in values]
 
         # Get a dictionary with the labels for each emotion and its values
-        values_dict = dict(zip(self.utils.tte_model.config.id2label.values(), values))
+        values_dict = dict(zip(self.models.tte_model.config.id2label.values(), values))
 
         # Sort the dictionary by values in descending order
         sorted_values = {k: v for k, v in sorted(values_dict.items(), key=lambda x: x[1], reverse=True)}

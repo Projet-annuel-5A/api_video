@@ -3,7 +3,6 @@ import sys
 import torch
 import logging
 import tempfile
-import warnings
 import numpy as np
 import configparser
 import pandas as pd
@@ -12,9 +11,6 @@ from pydub import AudioSegment
 from moviepy.editor import VideoFileClip
 from typing import Tuple, Any, List, Dict
 from supabase import create_client, Client
-warnings.filterwarnings("ignore", category=UserWarning)
-from pyannote.audio import Pipeline as AudioPipeline
-from transformers import AutoModelForSpeechSeq2Seq, AutoProcessor
 
 
 # Create custom stream handler
@@ -46,9 +42,6 @@ class BufferingHandler(logging.Handler):
             return '\n'.join(self.buffer)
         else:
             return ''
-            # with open(self.filename, 'w') as f:
-            #    for message in self.buffer:
-            #        f.write(message + '\n')
 
 
 class Utils:
@@ -66,7 +59,6 @@ class Utils:
 
             self.session_id = session_id
             self.interview_id = interview_id
-            self.device = "cuda:0" if torch.cuda.is_available() else "cpu"
 
             # S3 Folders
             self.output_s3_folder = '{}/{}/output'.format(self.session_id, self.interview_id)
@@ -74,17 +66,15 @@ class Utils:
             # Create loggers
             self.log = self.__init_logs()
             self.log.propagate = False
-            # sys.stderr = LoggerWriter(self.log, logging.ERROR)
 
             self.supabase_client = self.__check_supabase_connection()
             self.supabase_connection = self.__connect_to_bucket()
             self.supabase: Client = create_client(self.config['SUPABASE']['Url'], os.environ.get('SUPABASE_KEY'))
 
-            (self.diarization_pipeline,
-             self.stt_model,
-             self.stt_processor) = self.__init_models()
-
             self.__initialized = True
+
+    def __del__(self):
+        self.__initialized = False
 
     def __init_logs(self) -> logging.Logger:
         root_logger = logging.getLogger('mainLog')
@@ -124,27 +114,10 @@ class Utils:
                 path = os.path.join(base_path, 'config', 'config.ini')
                 with open(path) as f:
                     config.read_file(f)
-            except IOError:
+            except IOError as e:
                 print("No file 'config.ini' is present, the program can not continue")
-                sys.exit()
+                raise e
         return config
-
-    def __init_models(self) -> Tuple:
-        # Diarization
-        diarization_model_id = self.config['DIARIZATION']['ModelId']
-        diarization_pipeline = AudioPipeline.from_pretrained(diarization_model_id,
-                                                             use_auth_token=os.environ.get('HUGGINGFACE_TOKEN'))
-        self.log.info('Diarization pipeline created with model {} from HuggingFace'.format(diarization_model_id))
-
-        # Speech to text
-        stt_model_id = self.config['SPEECHTOTEXT']['ModelId']
-        stt_model = AutoModelForSpeechSeq2Seq.from_pretrained(stt_model_id)
-        stt_model.to(self.device)
-        stt_processor = AutoProcessor.from_pretrained(stt_model_id)
-
-        return (diarization_pipeline,
-                stt_model,
-                stt_processor)
 
     def delete_temp_files(self, files: List[str]) -> None:
         for file in files:
@@ -204,7 +177,7 @@ class Utils:
             s3_path = '{}/{}/{}'.format(self.output_s3_folder,
                                         s3_subfolder,
                                         filename) if s3_subfolder else '{}/{}'.format(self.output_s3_folder, filename)
-            self.supabase_connection.upload(file=content, path=s3_path, file_options={"content-type": content_type})
+            self.supabase_connection.upload(file=content, path=s3_path, file_options={'content-type': content_type})
             self.log.info('File {} uploaded to S3 bucket at {}'.format(filename, s3_path))
         except Exception as e:
             message = ('Error uploading the file {} to the S3 bucket.'.
@@ -241,51 +214,37 @@ class Utils:
 
         return audio_tensor
 
-    def merge_results(self, results: List[Dict[str, bool]]) -> None:
-        self.log.info('Merging results from text, audio and video processing')
+    def merge_results(self, res: List[Dict[str, bool]]) -> None:
+        try:
+            self.log.info('Merging results from text, audio and video processing')
 
-        text = [d['text'] for d in results if 'text' in d][0]
-        audio = [d['audio'] for d in results if 'audio' in d][0]
-        video = [d['video'] for d in results if 'video' in d][0]
+            text = [item['text'] for item in res if 'text' in item]
+            audio = [item['audio'] for item in res if 'audio' in item]
+            video = [item['video'] for item in res if 'video' in item]
 
-        valid_results = []
-        if text:
-            text_results = self.__read_df_from_s3('text_emotions')
-            valid_results.append(text_results)
-        if audio:
-            audio_results = self.__read_df_from_s3('audio_emotions')
-            valid_results.append(audio_results)
-        if video:
-            video_results = self.__read_df_from_s3('video_emotions')
-            valid_results.append(video_results)
+            results = self.__read_df_from_s3('texts')
 
-        # Check if there are results to merge
-        results = pd.DataFrame(columns=['speaker',
-                                        'part',
-                                        'start',
-                                        'end',
-                                        'text',
-                                        'text_emotions',
-                                        'audio_emotions',
-                                        'video_emotions']
-                               )
+            if text:
+                text_results = self.__read_df_from_s3('text_emotions')
+                results = (results.merge(text_results, on=['speaker', 'part'], how='inner'))
+            else:
+                results['text_emotions'] = ''
 
-        match len(valid_results):
-            case 1:
-                results = pd.concat([results, valid_results[0]], ignore_index=True)
-            case 2:
-                results = pd.concat([results, valid_results[0].merge(valid_results[1],
-                                                                     on=['speaker', 'part'],
-                                                                     how='inner')], ignore_index=True)
-            case 3:
-                results = (valid_results[0]
-                           .merge(valid_results[1], on=['speaker', 'part'], how='inner')
-                           .merge(valid_results[2], on=['speaker', 'part'], how='inner')
-                           )
-        results = results.fillna('')
+            if audio:
+                audio_results = self.__read_df_from_s3('audio_emotions')
+                results = (results.merge(audio_results, on=['speaker', 'part'], how='inner'))
+            else:
+                results['audio_emotions'] = ''
 
-        # Save the results file to S3
-        if len(valid_results) > 0:
+            if video:
+                video_results = self.__read_df_from_s3('video_emotions')
+                results = (results.merge(video_results, on=['speaker', 'part'], how='inner'))
+            else:
+                results['video_emotions'] = ''
+
+            results = results.fillna('')
+
+            # Save the results file to S3
             filename = 'results.h5'
             s3_path = '{}/results/{}'.format(self.output_s3_folder, filename)
             with tempfile.NamedTemporaryFile(suffix='.h5', delete=False) as temp_file:
@@ -303,8 +262,11 @@ class Utils:
 
                     with open(temp_file_path, 'rb') as f:
                         try:
-                            self.supabase_connection.upload(file=f, path=s3_path,
-                                                            file_options={'content-type': 'application/octet-stream'})
+                            self.supabase_connection.upload(
+                                file=f,
+                                path=s3_path,
+                                file_options={'content-type': 'application/octet-stream'}
+                            )
                             self.log.info('File {} uploaded to S3 bucket at {}'.format(filename, s3_path))
                         except Exception as e:
                             message = ('Error uploading the file {} to the S3 bucket. '.format(filename), str(e))
@@ -318,13 +280,14 @@ class Utils:
                     if os.path.exists(temp_file_path):
                         os.remove(temp_file_path)
 
-            # Save the results to the database
-            self.save_results_to_bd(results)
+                # Save the results to the database
+                self.save_results_to_bd(results)
 
-        self.log.info('Results merged and saved successfully')
+            self.log.info('Results merged and saved successfully')
+        except Exception as e:
+            raise e
 
     def open_input_file(self, video_name: str) -> Tuple[AudioSegment, str, str] | None:
-        # if env == 'S3':
         s3_path = '{}/{}/raw/{}'.format(self.session_id, self.interview_id, video_name)
         try:
             video_bytes = self.supabase_connection.download(s3_path)
@@ -358,7 +321,6 @@ class Utils:
             message = ('Error downloading the file {} from the S3 bucket. '.
                        format(video_name), str(e))
             self.log.error(message)
-            sys.exit(1)
         return audio_segment, temp_file_path, temp_file_path_2
 
     def update_bool_db(self, champ_name: str, value: bool) -> None:
@@ -417,6 +379,7 @@ class Utils:
 
     def save_results_to_bd(self, results: pd.DataFrame) -> None:
         self.log.info('Saving results to the supabase database')
+
         try:
             response = self.supabase.table('interviews').select('user_id').eq('id', self.interview_id).execute()
             user_id = response.data[0]['user_id']
@@ -426,6 +389,7 @@ class Utils:
             results = results.fillna('')
 
             data_to_insert = results.to_dict(orient='records')
+
             response = self.supabase.table('results').insert(data_to_insert).execute()
             self.log.info('{} lines saved to the database successfully'. format(len(response.data)))
         except Exception as e:

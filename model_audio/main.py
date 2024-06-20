@@ -1,9 +1,11 @@
 import uvicorn
 import pandas as pd
+from utils.models import Models
 from audioEmotions import AudioEmotions
 from fastapi import FastAPI, HTTPException
 
 app = FastAPI()
+models = Models()
 
 
 @app.get("/health")
@@ -32,6 +34,12 @@ async def process_audio(session_id: int, interview_id: int):
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         ate.utils.end_log()
+        ate.utils.__del__()
+
+
+@app.get("/testConfig")
+def test_config():
+    return {"Model '{}' loaded in".format(models.ate_model_id): models.device}
 
 
 if __name__ == "__main__":

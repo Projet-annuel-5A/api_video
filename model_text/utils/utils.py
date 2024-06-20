@@ -1,17 +1,12 @@
 import os
 import sys
-import torch
 import logging
-import warnings
 import tempfile
 import configparser
 import pandas as pd
-from typing import Tuple, Any
+from typing import Any
 from datetime import datetime
 from supabase import create_client, Client
-warnings.filterwarnings("ignore", category=UserWarning)
-from transformers import (AutoTokenizer,
-                          AutoModelForSequenceClassification)
 
 
 class BufferingHandler(logging.Handler):
@@ -46,7 +41,6 @@ class Utils:
 
             self.session_id = session_id
             self.interview_id = interview_id
-            self.device = "cuda:0" if torch.cuda.is_available() else "cpu"
 
             # S3 Folders
             self.output_s3_folder = '{}/{}/output'.format(self.session_id, self.interview_id)
@@ -58,10 +52,10 @@ class Utils:
             self.supabase_client = self.__check_supabase_connection()
             self.supabase_connection = self.__connect_to_bucket()
 
-            (self.tte_tokenizer,
-             self.tte_model) = self.__init_models()
-
             self.__initialized = True
+
+    def __del__(self):
+        self.__initialized = False
 
     def __init_logs(self) -> logging.Logger:
         logger = logging.getLogger('textLog')
@@ -87,21 +81,10 @@ class Utils:
                 path = os.path.join(base_path, 'config', 'textConfig.ini')
                 with open(path) as f:
                     config.read_file(f)
-            except IOError:
+            except IOError as e:
                 print("No file 'textConfig.ini' is present, the program can not continue")
-                sys.exit()
+                raise e
         return config
-
-    def __init_models(self) -> Tuple:
-        # Text to emotions
-        tte_model_id = self.config['TEXTEMOTIONS']['ModelId']
-        tte_tokenizer = AutoTokenizer.from_pretrained(tte_model_id)
-        tte_model = AutoModelForSequenceClassification.from_pretrained(tte_model_id)
-        tte_model.to(self.device)
-        self.log.info('Text-to-emotions model {} and tokenizer loaded in {}'.format(tte_model_id, self.device))
-
-        return (tte_tokenizer,
-                tte_model)
 
     def __check_supabase_connection(self) -> Client:
         try:
@@ -142,7 +125,7 @@ class Utils:
             s3_path = '{}/{}/{}'.format(self.output_s3_folder,
                                         s3_subfolder,
                                         filename) if s3_subfolder else '{}/{}'.format(self.output_s3_folder, filename)
-            self.supabase_connection.upload(file=content, path=s3_path, file_options={"content-type": content_type})
+            self.supabase_connection.upload(file=content, path=s3_path, file_options={'content-type': content_type})
             self.log.info('File {} uploaded to S3 bucket at {}'.format(filename, s3_path))
             return True
         except Exception as e:

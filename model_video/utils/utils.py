@@ -1,7 +1,6 @@
 import os
 import sys
 import json
-import torch
 import logging
 import tempfile
 import configparser
@@ -43,7 +42,6 @@ class Utils:
 
             self.session_id = session_id
             self.interview_id = interview_id
-            self.device = "cuda:0" if torch.cuda.is_available() else "cpu"
 
             # S3 Folders
             self.output_s3_folder = '{}/{}/output'.format(self.session_id, self.interview_id)
@@ -56,6 +54,9 @@ class Utils:
             self.supabase_connection = self.__connect_to_bucket()
 
             self.__initialized = True
+
+    def __del__(self):
+        self.__initialized = False
 
     def __init_logs(self) -> logging.Logger:
         logger = logging.getLogger('videoLog')
@@ -81,9 +82,9 @@ class Utils:
                 path = os.path.join(base_path, 'config', 'videoConfig.ini')
                 with open(path) as f:
                     config.read_file(f)
-            except IOError:
+            except IOError as e:
                 print("No file 'videoConfig.ini' is present, the program can not continue")
-                sys.exit()
+                raise e
         return config
 
     def __check_supabase_connection(self) -> Client:
@@ -121,7 +122,7 @@ class Utils:
             s3_path = '{}/{}/{}'.format(self.output_s3_folder,
                                         s3_subfolder,
                                         filename) if s3_subfolder else '{}/{}'.format(self.output_s3_folder, filename)
-            self.supabase_connection.upload(file=content, path=s3_path, file_options={"content-type": content_type})
+            self.supabase_connection.upload(file=content, path=s3_path, file_options={'content-type': content_type})
             self.log.info('File {} uploaded to S3 bucket at {}'.format(filename, s3_path))
             return True
         except Exception as e:

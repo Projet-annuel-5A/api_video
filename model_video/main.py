@@ -1,8 +1,10 @@
 import uvicorn
+from utils.models import Models
 from videoEmotions import VideoEmotions
 from fastapi import FastAPI, HTTPException
 
 app = FastAPI()
+models = Models()
 
 
 @app.get("/health")
@@ -23,6 +25,12 @@ async def process_video(session_id: int, interview_id: int):
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         vte.utils.end_log()
+        vte.utils.__del__()
+
+
+@app.get("/testConfig")
+def test_config():
+    return {"Model loaded in": models.device}
 
 
 if __name__ == "__main__":

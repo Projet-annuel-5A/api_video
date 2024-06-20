@@ -4,13 +4,14 @@ import uvicorn
 import requests
 import threading
 from tqdm import tqdm
-from typing import Dict
 from queue import Queue
 import concurrent.futures
 from utils.utils import Utils
+from typing import Dict, List
 from pydantic import BaseModel
 from dotenv import load_dotenv
 from pydub import AudioSegment
+from utils.models import Models
 from utils.diarizator import Diarizator
 from utils.audioSplit import AudioSplit
 from fastapi import FastAPI, HTTPException
@@ -18,6 +19,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 
 app = FastAPI()
+models = Models()
 
 origins = [
     "http://localhost:3000",
@@ -31,6 +33,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+class PredictRequest(BaseModel):
+    session_id: int
+    interview_id: int
 
 
 class Process:
@@ -95,58 +102,72 @@ class Process:
         self.utils.update_bool_db('audio_split_ok', True)
         self.utils.log.info('Split audio finished')
 
-    def __process_all(self, queue: Queue) -> None:
+    def __pre_process(self) -> List[str]:
         drz = Diarizator()
         temp_files = []
 
+        filename = self.utils.config['GENERAL']['Filename']
+
+        # Extract the audio from the video file
+        audio_file, temp_file_path, temp_file_path_2 = self.utils.open_input_file(filename)
+        temp_files.append(temp_file_path)
+        temp_files.append(temp_file_path_2)
+        audio_name = '{}.wav'.format(filename.split('.')[0])
+
+        # Diarize and split the audio file
+        speakers = drz.process(audio_file, audio_name)
+        print('\nDiarization done')
+        self.increasing_tqdm = False
+        self.utils.save_to_s3('speakers.json', json.dumps(speakers).encode(), 'text', 'temp')
+
+        self.__split_audio(audio_file, speakers, self.utils.config['GENERAL']['Language'])
+        print('\nSplit audio done')
+        self.increasing_tqdm = False
+
+        return temp_files
+
+    def __process_all(self, queue: Queue, mode='Full') -> None:
+
+        temp_files = []
         all_results = []
         try:
+            temp_files = self.__pre_process()
+            if mode == 'Full':
+                self.utils.log.info('Starting emotions detection from text, audio and video')
+                print('\nStarting emotions detection from text, audio and video')
 
-            filename = self.utils.config['GENERAL']['Filename']
-            # Extract the audio from the video file
-            audio_file, temp_file_path, temp_file_path_2 = self.utils.open_input_file(filename)
-            temp_files.append(temp_file_path)
-            temp_files.append(temp_file_path_2)
-            audio_name = '{}.wav'.format(filename.split('.')[0])
+                # Submit the three methods to be executed concurrently
+                with concurrent.futures.ThreadPoolExecutor() as executor:
+                    text_results = executor.submit(self.__analyse_text)
+                    audio_results = executor.submit(self.__analyse_audio)
+                    video_results = executor.submit(self.__analyse_video)
 
-            # Diarize and split the audio file
-            speakers = drz.process(audio_file, audio_name)
-            print('\nDiarization done')
-            self.increasing_tqdm = False
-            self.utils.save_to_s3('speakers.json', json.dumps(speakers).encode(), 'text', 'temp')
-            self.__split_audio(audio_file, speakers, self.utils.config['GENERAL']['Language'])
-            print('\nSplit audio done')
-            self.increasing_tqdm = False
+                for future in concurrent.futures.as_completed([text_results, audio_results, video_results]):
+                    try:
+                        result = future.result()
+                        all_results.append(result)
+                    except Exception as e:
+                        self.utils.log.error('An error occurred: {}'.format(e))
+                        print('\nAn error occurred: {}'.format(e))
+                self.utils.log.info('Emotions detection threads from text, audio and video have finished')
+            else:
+                print('\nEmotions detection process skipped')
 
-            self.utils.log.info('Starting emotions detection from text, audio and video')
-            print('\nStarting emotions detection from text, audio and video')
-
-            # Submit the three methods to be executed concurrently
-            with concurrent.futures.ThreadPoolExecutor() as executor:
-                text_results = executor.submit(self.__analyse_text)
-                audio_results = executor.submit(self.__analyse_audio)
-                video_results = executor.submit(self.__analyse_video)
-
-            for future in concurrent.futures.as_completed([text_results, audio_results, video_results]):
-                try:
-                    result = future.result()
-                    all_results.append(result)
-                except Exception as e:
-                    self.utils.log.error('An error occurred: {}'.format(e))
-                    print('\nAn error occurred: {}'.format(e))
-
-            self.utils.log.info('Emotions detection threads from text, audio and video have finished')
             result = (True, None)
         except Exception as e:
             result = (False, e)
         finally:
-            print('\nMerging and saving results')
-            self.increasing_tqdm = False
-            self.utils.merge_results(all_results)
+            if mode == 'Full':
+                try:
+                    print('\nMerging and saving results')
+                    self.increasing_tqdm = False
+                    self.utils.merge_results(all_results)
 
-            print('\nDeleting temporary files')
-            self.increasing_tqdm = False
-            self.utils.delete_temp_files(temp_files)
+                    print('\nDeleting temporary files')
+                    self.increasing_tqdm = False
+                    self.utils.delete_temp_files(temp_files)
+                except Exception as e:
+                    raise e
         queue.put(result)
 
     def start_process(self):
@@ -160,6 +181,7 @@ class Process:
 
             # Start the process function in a separate thread
             main_thread = threading.Thread(target=self.__process_all, args=(main_queue, ))
+            # main_thread = threading.Thread(target=self.__process_all, args=(main_queue, 'Preprocess'))
             main_thread.start()
 
             # Create an indeterminate progress bar
@@ -194,17 +216,13 @@ class Process:
         finally:
             print('\nSaving log files')
             self.utils.end_logs()
+            self.utils.__del__()
             print('Program finished')
 
 
 @app.get("/health")
 def health():
     return {"status": "ok"}
-
-
-class PredictRequest(BaseModel):
-    session_id: int
-    interview_id: int
 
 
 @app.post("/predict")
@@ -249,6 +267,12 @@ async def delete_all(session_id: int, interview_id: int):
         return {"status": "ok"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/testConfig")
+def test_config():
+    return {"Models '{}' and '{}' loaded in".format(models.diarization_model_id, models.stt_model_id): models.device}
+
 
 if __name__ == '__main__':
     uvicorn.run(app, host='127.0.0.1', port=8000, reload=True)
