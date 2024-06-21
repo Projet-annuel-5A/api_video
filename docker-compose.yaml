@@ -15,3 +15,6 @@ services:
     build: "model_video"
     ports:
       - "8003:8003"
+  
+networks:
+  default:
