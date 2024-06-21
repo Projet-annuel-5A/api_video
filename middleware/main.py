@@ -1,3 +1,4 @@
+import os
 import time
 import json
 import uvicorn
@@ -24,6 +25,7 @@ models = Models()
 origins = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
+    "*"
 ]
 
 app.add_middleware(
@@ -53,7 +55,7 @@ class Process:
         }
 
     def __analyse_text(self) -> Dict[str, bool]:
-        url = 'http://127.0.0.1:8002/analyse_text'
+        url = f"http://{os.environ.get('API_TEXT_IP')}:8002/analyse_text"
         response = requests.post(url, params=self.params)
         if response.status_code == 200:
             self.utils.update_bool_db('text_ok', True)
@@ -65,7 +67,7 @@ class Process:
             return {'text': False}
 
     def __analyse_video(self) -> Dict[str, bool]:
-        url = 'http://127.0.0.1:8003/analyse_video'
+        url = f"http://{os.environ.get('API_VIDEO_IP')}:8003/analyse_video"
         response = requests.post(url, params=self.params)
 
         if response.status_code == 200:
@@ -78,7 +80,7 @@ class Process:
             return {'video': False}
 
     def __analyse_audio(self) -> Dict[str, bool]:
-        url = 'http://127.0.0.1:8001/analyse_audio'
+        url = f"http://{os.environ.get('API_AUDIO_IP')}:8001/analyse_audio"
         response = requests.post(url, params=self.params)
 
         if response.status_code == 200:
@@ -275,4 +277,5 @@ def test_config():
 
 
 if __name__ == '__main__':
-    uvicorn.run(app, host='0.0.0.0', port=8000, reload=True)
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run(app, host='0.0.0.0', port=port, reload=True)
