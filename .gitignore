@@ -166,3 +166,4 @@ cython_debug/
 # Application folders and files
 /files/
 /notebooks/test/
+/model_video/data/
