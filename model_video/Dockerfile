@@ -2,7 +2,7 @@
 FROM python:3.11.9-slim as builder
 
 # Install system dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends build-essential wget && \
+RUN apt-get update && apt-get install -y --no-install-recommends build-essential wget && apt-get install ffmpeg libsm6 libxext6 -y && \
     rm -rf /var/lib/apt/lists/*
 
 # Install CUDA repository keyring and CUDA toolkit
