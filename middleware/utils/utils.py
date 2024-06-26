@@ -313,6 +313,8 @@ class Utils:
 
                             # Load the temporary file with pydub
                             audio_segment = AudioSegment.from_file(temp_file_path_2, format='wav')
+                        except Exception as e:
+                            raise e
                         finally:
                             temp_file_2.close()
                 finally:
