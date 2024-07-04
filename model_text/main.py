@@ -17,14 +17,11 @@ async def process_text(session_id: int, interview_id: int):
     tte = TextEmotions(session_id=session_id,
                        interview_id=interview_id)
     try:
-        # Open texts file from S3
-        df = tte.utils.read_texts_from_s3()
-        # res = tte.process(df['text'])
-        # df['text_emotions'] = res
-        res = df[['speaker', 'part']]
-        res['text_emotions'] = tte.process(df['text'])
-
-        tte.utils.df_to_temp_s3(res, filename='text_emotions')
+        # Open texts file from database
+        res = tte.utils.get_texts_from_db()
+        res['text_emotions'] = tte.process(res['text'])
+        res.drop(columns='text', inplace=True)
+        tte.utils.update_results(res)
         return {"status": "ok"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

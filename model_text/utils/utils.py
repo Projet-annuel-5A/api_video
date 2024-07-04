@@ -1,7 +1,6 @@
 import os
 import sys
 import logging
-import tempfile
 import configparser
 import pandas as pd
 from typing import Any
@@ -51,6 +50,7 @@ class Utils:
 
             self.supabase_client = self.__check_supabase_connection()
             self.supabase_connection = self.__connect_to_bucket()
+            self.supabase: Client = create_client(self.config['SUPABASE']['Url'], os.environ.get('SUPABASE_KEY'))
 
             self.__initialized = True
 
@@ -144,45 +144,24 @@ class Utils:
                     self.save_to_s3('{}.log'.format(handler.filename), log.encode(), 'text', 'logs')
             logging.getLogger('textLog').removeHandler(handler)
 
-    def read_texts_from_s3(self) -> pd.DataFrame:
-        path = '{}/temp/texts.tmp'.format(self.output_s3_folder)
-        with tempfile.NamedTemporaryFile(suffix='.h5', delete=False) as temp_file:
-            temp_file_path = temp_file.name
-            try:
-                res = self.supabase_connection.download(path)
-                temp_file.write(res)
-                df = pd.read_hdf(temp_file_path, key='data', index_col=None)
-            except Exception as e:
-                message = ('Error reading the file from the S3 bucket. ', str(e))
-                self.log.error(message)
-                print(message)
-            finally:
-                temp_file.close()
-                if os.path.exists(temp_file_path):
-                    os.remove(temp_file_path)
-        return df
+    def get_texts_from_db(self) -> pd.DataFrame:
+        res = (self.supabase.table('results').select('text', 'id')
+               .eq('interview_id', self.interview_id)
+               .eq('speaker', 0)
+               .execute())
+        results = pd.DataFrame(res.data)
+        results.set_index('id', inplace=True)
+        return results
 
-    def df_to_temp_s3(self, df: pd.DataFrame, filename: str) -> None:
-        s3_path = '{}/temp/{}.tmp'.format(self.output_s3_folder, filename)
-        with tempfile.NamedTemporaryFile(suffix='.h5', delete=False) as temp_file:
-            temp_file_path = temp_file.name
-            try:
-                df.to_hdf(temp_file_path, key='data', mode='w', complevel=9, complib='blosc')
-
-                with open(temp_file_path, 'rb') as f:
-                    try:
-                        self.supabase_connection.upload(file=f, path=s3_path,
-                                                        file_options={'content-type': 'application/octet-stream'})
-                        self.log.info('File {} uploaded to S3 bucket'.format(s3_path))
-                    except Exception as e:
-                        message = (
-                            'Error uploading the file to the S3 bucket. ', str(e))
-                        self.log.info(message)
-            except Exception as e:
-                message = ('Error saving the dataframe {} to the S3 bucket. '.format(filename), str(e))
-                self.log.info(message)
-                print(message)
-            finally:
-                temp_file.close()
-                if os.path.exists(temp_file_path):
-                    os.remove(temp_file_path)
+    def update_results(self, results: pd.DataFrame) -> None:
+        try:
+            for row in results.itertuples():
+                (self.supabase.table('results')
+                 .update({'text_emotions': row.text_emotions})
+                 .eq('id', row.Index)
+                 .execute()
+                 )
+            self.log.info('Results from text updated in the database')
+        except Exception as e:
+            self.log.error('Error updating the results from text in the database')
+            raise e

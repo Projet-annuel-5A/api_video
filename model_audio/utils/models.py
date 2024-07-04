@@ -43,7 +43,6 @@ class Models:
 
     def __init_models(self, ate_model_id) -> Tuple:
         # Audio to emotions
-        # ate_model_id = self.config['AUDIOEMOTIONS']['ModelId']
         ate_model = AutoModelForAudioClassification.from_pretrained(ate_model_id)
         ate_model.to(self.device)
         ate_feature_extractor = Wav2Vec2FeatureExtractor.from_pretrained(ate_model_id)

@@ -1,5 +1,4 @@
 import uvicorn
-import pandas as pd
 from utils.models import Models
 from audioEmotions import AudioEmotions
 from fastapi import FastAPI, HTTPException
@@ -18,17 +17,9 @@ async def process_audio(session_id: int, interview_id: int):
     ate = AudioEmotions(session_id=session_id,
                         interview_id=interview_id)
     try:
-        res = pd.DataFrame(columns=['speaker', 'part', 'audio_emotions'])
-        speakers = ate.utils.get_speakers_from_s3()
-        for current_speaker in speakers:
-            emotions = pd.DataFrame(columns=['speaker', 'part', 'audio_emotions'])
-            all_files, all_emotions = ate.process_folder(current_speaker)
-            emotions['part'] = all_files
-            emotions['audio_emotions'] = all_emotions
-            emotions['speaker'] = int(current_speaker.split('_')[1])
-            res = pd.concat([res, emotions], ignore_index=True)
-
-        ate.utils.df_to_temp_s3(res, filename='audio_emotions')
+        segments = ate.utils.get_segments_from_db()
+        segments['audio_emotions'] = ate.split_and_predict(segments)
+        ate.utils.update_results(segments)
         return {"status": "ok"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

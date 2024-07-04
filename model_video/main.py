@@ -17,9 +17,9 @@ async def process_video(session_id: int, interview_id: int):
     vte = VideoEmotions(session_id=session_id,
                         interview_id=interview_id)
     try:
-        speakers = vte.utils.get_speakers_from_s3()
-        res = vte.process(speakers)
-        vte.utils.df_to_temp_s3(res, filename='video_emotions')
+        segments = vte.utils.get_segments_from_db()
+        segments['video_emotions'] = vte.split_and_predict(segments)
+        vte.utils.update_results(segments)
         return {"status": "ok"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

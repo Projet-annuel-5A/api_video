@@ -1,12 +1,13 @@
-import os
+import io
 import torch
-import tempfile
 import torchaudio
+import pandas as pd
+from typing import Dict, List
 from utils.utils import Utils
 from dotenv import load_dotenv
+from pydub import AudioSegment
 from utils.models import Models
 import torch.nn.functional as f
-from typing import Dict, List, Tuple
 
 
 class AudioEmotions:
@@ -16,55 +17,51 @@ class AudioEmotions:
         self.utils = Utils(session_id, interview_id)
         self.models = Models()
 
-    def process_folder(self, current_speaker: str) -> Tuple[List, List]:
-        all_files = list()
-        all_emotions = list()
+    def split_and_predict(self, segments: pd.DataFrame) -> List[Dict[str, float]]:
+        sentiments = list()
 
-        s3_path = '{}/{}'.format(self.utils.output_s3_folder, current_speaker)
-        for file in self.utils.supabase_connection.list(s3_path):
-            filename = file['name']
-            if filename.split('.')[-1] == 'wav':
+        try:
+            filename = self.utils.config['GENERAL']['Audioname']
+            self.utils.log.info('Recognizing emotions from audio file')
+            s3_path = '{}/{}/raw/{}'.format(self.utils.session_id, self.utils.interview_id, filename)
+            audio_bytes = self.utils.open_input_file(s3_path, filename)
+            audio = AudioSegment.from_file(io.BytesIO(audio_bytes), format="mp3")
 
-                emotions = self.__download_and_predict(filename, s3_path)
-                all_emotions.append(emotions)
-                part_number = int((filename.split('.')[0]).split('_')[-1])
-                all_files.append(part_number)
-        return all_files, all_emotions
+            for row in segments.itertuples():
+                audio_segment = audio[row.start:row.end]
+                audio_segment_bytes = io.BytesIO()
+                audio_segment.export(audio_segment_bytes, format="mp3")
+                audio_segment_bytes.seek(0)
 
-    def __download_and_predict(self, filename: str, s3_path: str) -> Dict[str, float]:
-        self.utils.log.info('Recognizing emotions from audio file {}'.format(filename))
+                speech_array, sample_rate = torchaudio.load(audio_segment_bytes)
+                resampler = torchaudio.transforms.Resample(sample_rate, self.models.ate_sampling_rate)
+                speech = resampler(speech_array).squeeze().numpy()
 
-        downloaded_file = self.utils.supabase_connection.download('{}/{}'.format(s3_path, filename))
-        with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as temp_file:
-            temp_file_path = temp_file.name
-            temp_file.write(downloaded_file)
+                inputs = self.models.ate_feature_extractor(speech,
+                                                           sampling_rate=self.models.ate_sampling_rate,
+                                                           return_tensors="pt",
+                                                           padding=True)
 
-        speech_array, _sampling_rate = torchaudio.load(temp_file_path)
+                inputs = {key: inputs[key].to(self.models.device) for key in inputs}
 
-        resampler = torchaudio.transforms.Resample(_sampling_rate, self.models.ate_sampling_rate)
-        speech = resampler(speech_array).squeeze().numpy()
+                with torch.no_grad():
+                    logits = self.models.ate_model(**inputs).logits
 
-        inputs = self.models.ate_feature_extractor(speech, sampling_rate=self.models.ate_sampling_rate,
-                                                   return_tensors="pt", padding=True)
-        inputs = {key: inputs[key].to(self.models.device) for key in inputs}
+                scores = f.softmax(logits, dim=1).detach().cpu().numpy()[0]
 
-        with torch.no_grad():
-            logits = self.models.ate_model(**inputs).logits
+                # Get the percentage scores and round them to 5 decimal places
+                scores = [round(num * 100, 5) for num in scores]
 
-        scores = f.softmax(logits, dim=1).detach().cpu().numpy()[0]
+                # Get a dictionary with the labels for each emotion and its values
+                values_dict = dict(zip(self.models.ate_model.config.id2label.values(), scores))
 
-        # Get the percentage scores and round them to 5 decimal places
-        scores = [round(num * 100, 5) for num in scores]
+                # Sort the dictionary by values in descending order
+                sorted_values = {k: v for k, v in sorted(values_dict.items(), key=lambda x: x[1], reverse=True)}
 
-        # Get a dictionary with the labels for each emotion and its values
-        values_dict = dict(zip(self.models.ate_model.config.id2label.values(), scores))
+                sentiments.append(sorted_values)
+        except Exception as e:
+            message = ('Error splitting and predicting the emotions from the audio file.', str(e))
+            self.utils.log.error(message)
+            raise e
 
-        # Sort the dictionary by values in descending order
-        sorted_values = {k: v for k, v in sorted(values_dict.items(), key=lambda x: x[1], reverse=True)}
-
-        temp_file.close()
-        # Clean up the temporary file
-        if os.path.exists(temp_file_path):
-            os.remove(temp_file_path)
-
-        return sorted_values
+        return sentiments

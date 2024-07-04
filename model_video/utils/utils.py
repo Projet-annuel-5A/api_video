@@ -1,12 +1,10 @@
 import os
 import sys
-import json
 import logging
-import tempfile
 import configparser
 import pandas as pd
+from typing import Any
 from datetime import datetime
-from typing import Tuple, Any, Dict, List
 from supabase import create_client, Client
 
 
@@ -52,6 +50,7 @@ class Utils:
 
             self.supabase_client = self.__check_supabase_connection()
             self.supabase_connection = self.__connect_to_bucket()
+            self.supabase: Client = create_client(self.config['SUPABASE']['Url'], os.environ.get('SUPABASE_KEY'))
 
             self.__initialized = True
 
@@ -141,34 +140,40 @@ class Utils:
                     self.save_to_s3('{}.log'.format(handler.filename), log.encode(), 'text', 'logs')
             logging.getLogger('videoLog').removeHandler(handler)
 
-    def get_speakers_from_s3(self) -> Dict[str, List[Tuple[float, float]]]:
-        path = '{}/temp/speakers.json'.format(self.output_s3_folder)
-        res = self.supabase_connection.download(path)
-        speakers_str = res.decode()
-        speakers = json.loads(speakers_str)
-        return speakers
+    def get_segments_from_db(self) -> pd.DataFrame | None:
+        try:
+            res = (self.supabase.table('results').select('id', 'start', 'end')
+                   .eq('interview_id', self.interview_id)
+                   .eq('speaker', 0)
+                   .execute())
+            results = pd.DataFrame(res.data)
+            results.set_index('id', inplace=True)
+            return results
+        except Exception as e:
+            message = ('Error getting the segments from the database.', str(e))
+            self.log.error(message)
+            raise e
 
-    def df_to_temp_s3(self, df: pd.DataFrame, filename: str) -> None:
-        s3_path = '{}/temp/{}.tmp'.format(self.output_s3_folder, filename)
-        with tempfile.NamedTemporaryFile(suffix='.h5', delete=False) as temp_file:
-            temp_file_path = temp_file.name
-            try:
-                df.to_hdf(temp_file_path, key='data', mode='w', complevel=9, complib='blosc')
+    def open_input_file(self, s3_path: str, file_name: str) -> bytes | None:
+        try:
+            self.log.info('Getting file {} from the S3 bucket'.format(file_name))
+            file_bytes = self.supabase_connection.download(s3_path)
+            return file_bytes
+        except Exception as e:
+            message = ('Error downloading the file {} from the S3 bucket. '.
+                       format(file_name), str(e))
+            self.log.error(message)
+            raise e
 
-                with open(temp_file_path, 'rb') as f:
-                    try:
-                        self.supabase_connection.upload(file=f, path=s3_path,
-                                                        file_options={'content-type': 'application/octet-stream'})
-                        self.log.info('File {} uploaded to S3 bucket'.format(s3_path))
-                    except Exception as e:
-                        message = (
-                            'Error uploading the file to the S3 bucket. ', str(e))
-                        self.log.info(message)
-            except Exception as e:
-                message = ('Error saving the dataframe {} to the S3 bucket. '.format(filename), str(e))
-                self.log.info(message)
-                print(message)
-            finally:
-                temp_file.close()
-                if os.path.exists(temp_file_path):
-                    os.remove(temp_file_path)
+    def update_results(self, results: pd.DataFrame) -> None:
+        try:
+            for row in results.itertuples():
+                (self.supabase.table('results')
+                 .update({'video_emotions': row.video_emotions})
+                 .eq('id', row.Index)
+                 .execute()
+                 )
+            self.log.info('Results from video updated in the database')
+        except Exception as e:
+            self.log.error('Error updating the results from video in the database')
+            raise e
