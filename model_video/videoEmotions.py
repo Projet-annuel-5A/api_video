@@ -1,6 +1,6 @@
-import os
+import av
+import io
 import cv2
-import tempfile
 import numpy as np
 import pandas as pd
 from typing import List, Dict
@@ -35,70 +35,64 @@ class VideoEmotions:
         filename = self.utils.config['GENERAL']['Filename']
         s3_path = '{}/{}/raw/{}'.format(self.utils.session_id, self.utils.interview_id, filename)
         video_bytes = self.utils.open_input_file(s3_path, filename)
+        container = av.open(io.BytesIO(video_bytes))
 
-        with (tempfile.NamedTemporaryFile(suffix='.mp4', delete=False) as temp_file):
-            temp_file_path = temp_file.name
-            try:
-                temp_file.write(video_bytes)
-                clip = cv2.VideoCapture(temp_file_path)
+        # Set the interval for extracting frames
+        timing = self.utils.config.getfloat('VIDEOEMOTION', 'Interval')
 
-                # Get video fps
-                fps = clip.get(cv2.CAP_PROP_FPS)
+        try:
+            for row in segments.itertuples():
+                sentiments = list()
+                image_count = 0
 
-                # Set the interval for extracting frames
-                timing = self.utils.config.getfloat('VIDEOEMOTION', 'Interval')
-                interval = int(fps) * timing
+                start_time = row.start / 1000
+                end_time = row.end / 1000
 
-                for row in segments.itertuples():
-                    sentiments = list()
+                container.seek(int(start_time * av.time_base))
+                self.utils.log.info('Clip start time: {}, end time: {}.'.format(start_time, end_time))
 
-                    # Calculate frame indices for starting and ending times
-                    start_frame = int(row.start / 1000 * fps)
-                    end_frame = int(row.end / 1000 * fps)
+                # Flag to ensure end_time frame is captured
+                end_frame_captured = False
 
-                    # Set starting frame
-                    clip.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
+                # Initialize variables to track frame extraction
+                last_extracted_time = start_time - timing  # ensures the first frame is extracted at start_time
 
-                    # Read the video frame by frame and send respective frames to prediction
-                    frame_count = 0
-                    image_count = 0
-                    while clip.isOpened() and frame_count <= (end_frame - start_frame):
-                        ret, frame = clip.read()
+                for frame in container.decode(video=0):
+                    frame_time = frame.time
 
-                        # If there are no more frames, break the loop
-                        if not ret:
-                            break
+                    if frame_time < start_time:
+                        continue
 
-                        # Detect emotions from the frame if it's the first one or if it's a multiple of the interval
-                        if frame_count == 0 or frame_count % interval == 0:
-                            image_name = 'image_{:05d}'.format(image_count)
-                            image_count += 1
+                    # Extract the last frame at end_time
+                    if frame_time >= end_time and not end_frame_captured:
+                        img = frame.to_image()
+                        img_array = np.array(img)
+                        img_array = cv2.cvtColor(img_array, cv2.COLOR_RGB2BGR)
+                        sentiments.append({'frame_{:05d}'.format(image_count): self.__predict(img_array)})
+                        image_count += 1
 
-                            sentiments.append({image_name: self.__predict(frame)})
+                        end_frame_captured = True
+                        self.utils.log.info('Last frame captured: {}'.format(frame_time))
+                        break
 
-                        # Save the last frame
-                        elif start_frame + frame_count == end_frame:
-                            image_name = 'image_{:05d}'.format(image_count)
-                            image_count += 1
+                    if start_time <= frame_time < end_time and frame_time >= last_extracted_time + timing:
+                        img = frame.to_image()
+                        img_array = np.array(img)
+                        img_array = cv2.cvtColor(img_array, cv2.COLOR_RGB2BGR)
+                        sentiments.append({'frame_{:05d}'.format(image_count): self.__predict(img_array)})
+                        image_count += 1
+                        self.utils.log.info('Capturing frame {}'.format(frame_time))
 
-                            sentiments.append({image_name: self.__predict(frame)})
+                        # Update the last extracted time
+                        last_extracted_time = frame_time
 
-                        frame_count += 1
-
-                    all_sentiments.append(sentiments)
-
-                # Release the video capture object
-                clip.release()
-            except Exception as e:
-                message = ('Error processing video emotions.', str(e))
-                self.utils.log.error(message)
-                print(message)
-            finally:
-                temp_file.close()
-                # Clean up the temporary file
-                if os.path.exists(temp_file_path):
-                    os.remove(temp_file_path)
-
+                all_sentiments.append(sentiments)
+        except Exception as e:
+            message = ('Error processing video emotions.', str(e))
+            self.utils.log.error(message)
+            print(message)
+        finally:
+            container.close()
             self.utils.log.info('Emotions extraction from video have finished')
             print('Emotions extraction from video have finished')
             return all_sentiments
