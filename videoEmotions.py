@@ -12,11 +12,27 @@ from utils.models import Models
 
 class VideoEmotions:
     def __init__(self, session_id: int, interview_id: int) -> None:
+        """
+        Initializes the VideoEmotions instance by loading environment variables and setting up
+        utilities for video emotion analysis.
+        Parameters:
+            session_id (int): Session identifier to be used for processing.
+            interview_id (int): Interview identifier for which video emotion analysis will be performed.
+        """
         # Load environment variables from .env file
         load_dotenv()
         self.utils = Utils(session_id, interview_id)
 
     def __predict(self, image: np.ndarray) -> Dict[str, float]:
+        """
+        Predicts emotional content from a single frame using facial emotion recognition technology.
+        Parameters:
+            image (np.ndarray): The image array from a video frame.
+        Returns:
+            Dict[str, float]: A dictionary with emotion labels and their corresponding probabilities.
+        Raises:
+            ValueError: If no face is detected in the frame, returns a default response.
+        """
         try:
             # ToDo: Replace library by the yolo model
             objs = DeepFace.analyze(image, actions=['emotion'])
@@ -27,6 +43,16 @@ class VideoEmotions:
         return emotions
 
     def split_and_predict(self, segments: pd.DataFrame) -> List[List[Dict[str, float]]]:
+        """
+        Processes video segments to analyze emotions, extracting frames at specified intervals
+        and applying emotion prediction.
+        Parameters:
+            segments (pd.DataFrame): DataFrame containing start and end times for video segments.
+        Returns:
+            List[List[Dict[str, float]]]: List of lists containing dictionaries with frame-specific emotion predictions.
+        Raises:
+            Exception: Captures and logs any exceptions, then re-raises them if video processing fails.
+        """
         all_sentiments = list()
 
         print('Processing sentiments from video')

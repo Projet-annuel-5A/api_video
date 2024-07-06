@@ -16,6 +16,12 @@ class Models:
         return cls._instance
 
     def __init__(self) -> None:
+        """
+        Initializes the Models instance. If the instance is already initialized, it returns the existing instance
+        (singleton pattern), otherwise, it sets up the configuration for the video processing module.
+        Raises:
+            IOError: If the configuration file 'videoConfig.ini' cannot be found, the program will terminate.
+        """
         if not self.__initialized:
             self.config = self.__get_config()
             self.device = "cuda:0" if torch.cuda.is_available() else "cpu"
@@ -23,6 +29,14 @@ class Models:
             self.__initialized = True
 
     def __get_config(self) -> configparser.ConfigParser:
+        """
+        Reads and returns the configuration from 'videoConfig.ini', which contains
+        necessary settings for video processing.
+        Returns:
+            configparser.ConfigParser: The loaded configuration settings.
+        Raises:
+            IOError: If the 'videoConfig.ini' file is not present, the method raises an IOError and exits the program.
+        """
         config = configparser.ConfigParser()
         if len(config.sections()) == 0:
             try:
