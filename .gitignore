@@ -29,3 +29,5 @@ __pycache__/
 **/.DS_Store
 
 .env
+/application_default_credentials.json
+/model/model.pt

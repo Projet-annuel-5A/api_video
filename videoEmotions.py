@@ -1,13 +1,14 @@
 import av
 import io
 import cv2
+import base64
 import numpy as np
 import pandas as pd
 from typing import List, Dict
-from deepface import DeepFace
 from utils.utils import Utils
 from dotenv import load_dotenv
 from utils.models import Models
+from google.api_core.exceptions import GoogleAPICallError
 
 
 class VideoEmotions:
@@ -22,23 +23,52 @@ class VideoEmotions:
         # Load environment variables from .env file
         load_dotenv()
         self.utils = Utils(session_id, interview_id)
+        self.model = Models()
 
-    def __predict(self, image: np.ndarray) -> Dict[str, float]:
+    def __predict(self, image: np.ndarray, env: str) -> Dict[str, float]:
         """
-        Predicts emotional content from a single frame using facial emotion recognition technology.
-        Parameters:
-            image (np.ndarray): The image array from a video frame.
-        Returns:
-            Dict[str, float]: A dictionary with emotion labels and their corresponding probabilities.
-        Raises:
-            ValueError: If no face is detected in the frame, returns a default response.
-        """
+            Detects sentiments from a single frame using either a cloud-based or local model.
+            This method takes an image and environment as input, and uses the specified model
+            (cloud or local) to predict the emotional content.
+            The results are returned as a dictionary with emotion labels and their probabilities.
+            Parameters:
+                image (np.ndarray): The image array from a video frame.
+                env (str): The environment to use for prediction. Should be either 'cloud' or 'local'.
+            Returns:
+                Dict[str, float]: A dictionary with emotion labels and their corresponding probabilities.
+            Raises:
+                GoogleAPICallError: If an API call to the cloud model fails.
+                Exception: For any other errors that occur during prediction.
+            Notes:
+                - For 'cloud' environment, the image is encoded to base64 and sent to a cloud prediction endpoint.
+                - For 'local' environment, the backup model is used to predict emotions directly on the image.
+            """
         try:
-            # ToDo: Replace library by the yolo model
-            objs = DeepFace.analyze(image, actions=['emotion'])
-            results = objs[0]['emotion']
-            emotions = {k: v for k, v in sorted(results.items(), key=lambda x: x[1], reverse=True)}
-        except ValueError:
+            if env == 'cloud':
+                _, buffer = cv2.imencode('.jpg', image)
+                image_bytes = base64.b64encode(buffer).decode('utf-8')
+
+                response = self.model.predict_endpoint.predict(instances=[
+                    {
+                        "image": image_bytes
+                    }
+                ])
+                results = response.predictions[0]
+            else:
+                response = self.model.backup_model(image, verbose=False)
+                results = {}
+                for i in range(len(response[0].probs)):
+                    class_index = i
+                    label = response[0].names[class_index]
+                    confidence = response[0].probs.data[class_index].item() * 100
+                    results[label] = confidence
+
+            emotions = {k: v * 100 for k, v in sorted(results.items(), key=lambda x: x[1], reverse=True)}
+        except GoogleAPICallError as e:
+            print('An API error occurred: {}'.format(e.message))
+            emotions = {'No face detected': 0.0}
+        except Exception as e:
+            print('An error occurred: {}'.format(str(e)))
             emotions = {'No face detected': 0.0}
         return emotions
 
@@ -65,6 +95,14 @@ class VideoEmotions:
 
         # Set the interval for extracting frames
         timing = self.utils.config.getfloat('VIDEOEMOTION', 'Interval')
+        if self.model.check_endpoint():
+            env = 'cloud'
+            self.utils.log.info('Using cloud endpoint for predictions from video')
+            print('Using cloud endpoint for predictions from video')
+        else:
+            env = 'local'
+            self.utils.log.info('Using local model for predictions from video')
+            print('Using local model for predictions from video')
 
         try:
             for row in segments.itertuples():
@@ -94,7 +132,10 @@ class VideoEmotions:
                         img = frame.to_image()
                         img_array = np.array(img)
                         img_array = cv2.cvtColor(img_array, cv2.COLOR_RGB2BGR)
-                        sentiments.append({'frame_{:05d}'.format(image_count): self.__predict(img_array)})
+                        sentiments.append({
+                            'frame_{:05d}_{:.3f}_seconds'.format(image_count, frame_time):
+                            self.__predict(img_array, env)
+                        })
                         image_count += 1
 
                         end_frame_captured = True
@@ -105,7 +146,10 @@ class VideoEmotions:
                         img = frame.to_image()
                         img_array = np.array(img)
                         img_array = cv2.cvtColor(img_array, cv2.COLOR_RGB2BGR)
-                        sentiments.append({'frame_{:05d}'.format(image_count): self.__predict(img_array)})
+                        sentiments.append({
+                            'frame_{:05d}_{:.3f}_seconds'.format(image_count, frame_time):
+                            self.__predict(img_array, env)
+                        })
                         image_count += 1
                         self.utils.log.info('Capturing frame {}'.format(frame_time))
 

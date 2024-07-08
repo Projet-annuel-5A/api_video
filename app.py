@@ -2,9 +2,24 @@ import uvicorn
 from utils.models import Models
 from videoEmotions import VideoEmotions
 from fastapi import FastAPI, HTTPException
+from contextlib import asynccontextmanager
 
-app = FastAPI()
 models = Models()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    print("Starting application lifespan...")
+    print('Starting on : {}'.format(models.device))
+
+    yield
+    # CLEANING MODEL
+    # del ml_models['yolo']
+    # torch.cuda.empty_cache()
+    print('Cleaned up model and released resources')
+
+
+app = FastAPI(lifespan=lifespan)
 
 
 @app.get("/health")
