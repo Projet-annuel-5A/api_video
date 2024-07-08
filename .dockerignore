@@ -12,22 +12,17 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# A gitignore file specifies intentionally untracked files that Git should ignore.
+# The .dockerignore file excludes files from the container build process
+# when building with the Docker CLI.
+#
+# https://docs.docker.com/engine/reference/builder/#dockerignore-file
 
 # Exclude locally installed dependencies
 venv/
-__pycache__/
 
-# Exclude local IDE settings
-.idea/
-.vscode/
+# Exclude "build-time" ignore files.
+.dockerignore
+.gcloudignore
 
-# Exclude testing cache
-.pytest_cache/
-
-# macOS
-**/.DS_Store
-
-.env
-/application_default_credentials.json
-/model/model.pt
+# Exclude git history and configuration.
+.gitignore
