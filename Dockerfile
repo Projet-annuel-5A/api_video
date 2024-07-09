@@ -28,10 +28,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Copy only the necessary files from the builder stage
 COPY --from=builder /usr/local /usr/local
 
-COPY application_default_credentials.json /root/.config/gcloud/application_default_credentials.json
-ENV GOOGLE_APPLICATION_CREDENTIALS=/root/.config/gcloud/application_default_credentials.json
-ENV GOOGLE_CLOUD_PROJECT=annual-project-427112
-
 # Set the working directory
 WORKDIR /app
 
