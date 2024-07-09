@@ -72,7 +72,7 @@ class VideoEmotions:
             emotions = {'No face detected': 0.0}
         return emotions
 
-    def split_and_predict(self, segments: pd.DataFrame) -> List[Dict[str:Dict[str, float]]]:
+    def split_and_predict(self, segments: pd.DataFrame) -> List[Dict[str, Dict[str, float]]]:
         """
         Processes video segments to analyze emotions, extracting frames at specified intervals
         and applying emotion prediction.
