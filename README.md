@@ -36,17 +36,11 @@ Endpoint to process video data for emotional analysis from stored video segments
 Parameters:
     session_id (int): The session ID for the video data.
     interview_id (int): The interview ID for the video data.
+    model_type (str): The model to use for prediction. Should be either 'yolo_cloud', 'yolo_local' or 'deepface'.
 Returns:
     dict: A status message indicating the success or failure of the operation.
 Raises:
     HTTPException: Exception with status code 500 indicating a server error if the process fails.
-"""
-```
-```fastAPI
-@app.post("/testConfig")
-"""
-Endpoint for testing the device where the models where loaded.
-Response: JSON object showing the model ID and the device (CPU or GPU) it is loaded on.
 """
 ```
 

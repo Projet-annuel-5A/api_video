@@ -6,13 +6,14 @@ import numpy as np
 import pandas as pd
 from typing import List, Dict
 from utils.utils import Utils
+from deepface import DeepFace
 from dotenv import load_dotenv
 from utils.models import Models
 from google.api_core.exceptions import GoogleAPICallError
 
 
 class VideoEmotions:
-    def __init__(self, session_id: int, interview_id: int) -> None:
+    def __init__(self, session_id: int, interview_id: int, model_type: str) -> None:
         """
         Initializes the VideoEmotions instance by loading environment variables and setting up
         utilities for video emotion analysis.
@@ -23,17 +24,19 @@ class VideoEmotions:
         # Load environment variables from .env file
         load_dotenv()
         self.utils = Utils(session_id, interview_id)
+        self.model_type = model_type
         self.model = Models()
 
     def __predict(self, image: np.ndarray, env: str) -> Dict[str, float]:
         """
-            Detects sentiments from a single frame using either a cloud-based or local model.
+            Detects sentiments from a single frame using either a cloud-based model, a local model or a python library.
             This method takes an image and environment as input, and uses the specified model
             (cloud or local) to predict the emotional content.
             The results are returned as a dictionary with emotion labels and their probabilities.
             Parameters:
                 image (np.ndarray): The image array from a video frame.
-                env (str): The environment to use for prediction. Should be either 'cloud' or 'local'.
+                env (str): The environment to use for prediction. Should be either 'yolo_cloud',
+                'yolo_local' or 'deepface'.
             Returns:
                 Dict[str, float]: A dictionary with emotion labels and their corresponding probabilities.
             Raises:
@@ -44,7 +47,7 @@ class VideoEmotions:
                 - For 'local' environment, the backup model is used to predict emotions directly on the image.
             """
         try:
-            if env == 'cloud':
+            if env == 'yolo_cloud':
                 _, buffer = cv2.imencode('.jpg', image)
                 image_bytes = base64.b64encode(buffer).decode('utf-8')
 
@@ -54,7 +57,8 @@ class VideoEmotions:
                     }
                 ])
                 results = response.predictions[0]
-            else:
+                emotions = {k: v * 100 for k, v in sorted(results.items(), key=lambda x: x[1], reverse=True)}
+            elif env == 'yolo_local':
                 response = self.model.backup_model(image, verbose=False)
                 results = {}
                 for i in range(len(response[0].probs)):
@@ -62,8 +66,11 @@ class VideoEmotions:
                     label = response[0].names[class_index]
                     confidence = response[0].probs.data[class_index].item()
                     results[label] = confidence
-
-            emotions = {k: v * 100 for k, v in sorted(results.items(), key=lambda x: x[1], reverse=True)}
+                emotions = {k: v * 100 for k, v in sorted(results.items(), key=lambda x: x[1], reverse=True)}
+            else:
+                objs = DeepFace.analyze(image, actions=['emotion'])
+                results = objs[0]['emotion']
+                emotions = {k: v for k, v in sorted(results.items(), key=lambda x: x[1], reverse=True)}
         except GoogleAPICallError as e:
             print('An API error occurred: {}'.format(e.message))
             emotions = {'No face detected': 0.0}
@@ -95,15 +102,17 @@ class VideoEmotions:
 
         # Set the interval for extracting frames
         timing = self.utils.config.getfloat('VIDEOEMOTION', 'Interval')
-        if self.model.check_endpoint():
-            env = 'cloud'
-            self.utils.log.info('Using cloud endpoint for predictions from video')
-            print('Using cloud endpoint for predictions from video')
+        if self.model_type == 'deepface':
+            env = 'deepface'
         else:
-            env = 'local'
-            self.utils.log.info('Using local model for predictions from video')
-            print('Using local model for predictions from video')
-
+            if self.model.check_endpoint():
+                env = 'yolo_cloud'
+                self.utils.log.info('Using cloud endpoint for predictions from video')
+                print('Using cloud endpoint for predictions from video')
+            else:
+                env = 'yolo_local'
+                self.utils.log.info('Using local model for predictions from video')
+                print('Using local model for predictions from video')
         try:
             for row in segments.itertuples():
                 sentiments = dict()

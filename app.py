@@ -31,19 +31,21 @@ def health():
 
 
 @app.post("/analyse_video")
-async def process_video(session_id: int, interview_id: int):
+async def process_video(session_id: int, interview_id: int, model_type: str):
     """
     Endpoint to process video data for emotional analysis from stored video segments.
     Parameters:
         session_id (int): The session ID for the video data.
         interview_id (int): The interview ID for the video data.
+        model_type (str): The model type to use for prediction. Should be either 'cloud' or 'local'.
     Returns:
         dict: A status message indicating the success or failure of the operation.
     Raises:
         HTTPException: Exception with status code 500 indicating a server error if the process fails.
     """
     vte = VideoEmotions(session_id=session_id,
-                        interview_id=interview_id)
+                        interview_id=interview_id,
+                        model_type=model_type)
     try:
         segments = vte.utils.get_segments_from_db()
         segments['video_emotions'] = vte.split_and_predict(segments)
@@ -54,15 +56,6 @@ async def process_video(session_id: int, interview_id: int):
     finally:
         vte.utils.end_log()
         vte.utils.__del__()
-
-
-@app.get("/testConfig")
-def test_config():
-    """
-    Endpoint for testing the device where the models where loaded.
-    Response: JSON object showing the model ID and the device (CPU or GPU) it is loaded on.
-    """
-    return {"Model loaded in": models.device}
 
 
 if __name__ == "__main__":
