@@ -4,12 +4,13 @@ from videoEmotions import VideoEmotions
 from fastapi import FastAPI, HTTPException
 from contextlib import asynccontextmanager
 
-models = Models()
+models = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     print("Starting application lifespan...")
+    models = Models()
     print('Starting on : {}'.format(models.device))
 
     yield
