@@ -60,7 +60,7 @@ class VideoEmotions:
                 for i in range(len(response[0].probs)):
                     class_index = i
                     label = response[0].names[class_index]
-                    confidence = response[0].probs.data[class_index].item() * 100
+                    confidence = response[0].probs.data[class_index].item()
                     results[label] = confidence
 
             emotions = {k: v * 100 for k, v in sorted(results.items(), key=lambda x: x[1], reverse=True)}
@@ -72,7 +72,7 @@ class VideoEmotions:
             emotions = {'No face detected': 0.0}
         return emotions
 
-    def split_and_predict(self, segments: pd.DataFrame) -> List[List[Dict[str, float]]]:
+    def split_and_predict(self, segments: pd.DataFrame) -> List[Dict[str:Dict[str, float]]]:
         """
         Processes video segments to analyze emotions, extracting frames at specified intervals
         and applying emotion prediction.
@@ -106,7 +106,7 @@ class VideoEmotions:
 
         try:
             for row in segments.itertuples():
-                sentiments = list()
+                sentiments = dict()
                 image_count = 0
 
                 start_time = row.start / 1000
@@ -132,13 +132,14 @@ class VideoEmotions:
                         img = frame.to_image()
                         img_array = np.array(img)
                         img_array = cv2.cvtColor(img_array, cv2.COLOR_RGB2BGR)
-                        sentiments.append({
-                            'frame_{:05d}_{:.3f}_seconds'.format(image_count, frame_time):
-                            self.__predict(img_array, env)
-                        })
-                        image_count += 1
 
+                        key = 'frame_{:05d}_{:.3f}_seconds'.format(image_count, frame_time)
+                        value = self.__predict(img_array, env)
+                        sentiments[key] = value
+
+                        image_count += 1
                         end_frame_captured = True
+
                         self.utils.log.info('Last frame captured: {}'.format(frame_time))
                         break
 
@@ -146,15 +147,17 @@ class VideoEmotions:
                         img = frame.to_image()
                         img_array = np.array(img)
                         img_array = cv2.cvtColor(img_array, cv2.COLOR_RGB2BGR)
-                        sentiments.append({
-                            'frame_{:05d}_{:.3f}_seconds'.format(image_count, frame_time):
-                            self.__predict(img_array, env)
-                        })
+
+                        key = 'frame_{:05d}_{:.3f}_seconds'.format(image_count, frame_time)
+                        value = self.__predict(img_array, env)
+                        sentiments[key] = value
+
                         image_count += 1
-                        self.utils.log.info('Capturing frame {}'.format(frame_time))
 
                         # Update the last extracted time
                         last_extracted_time = frame_time
+
+                        self.utils.log.info('Capturing frame {}'.format(frame_time))
 
                 all_sentiments.append(sentiments)
         except Exception as e:

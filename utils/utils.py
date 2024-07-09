@@ -188,7 +188,7 @@ class Utils:
             if isinstance(handler, BufferingHandler):
                 log = handler.flush()
                 if log:
-                    s3_path = 'logs/{}'.format(handler.filename)
+                    s3_path = '{}/{}/logs/{}'.format(self.session_id, self.interview_id, handler.filename)
                     try:
                         self.supabase_connection.upload(file=log.encode(),
                                                         path=s3_path,

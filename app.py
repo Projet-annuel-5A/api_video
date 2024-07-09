@@ -13,10 +13,7 @@ async def lifespan(app: FastAPI):
     print('Starting on : {}'.format(models.device))
 
     yield
-    # CLEANING MODEL
-    # del ml_models['yolo']
-    # torch.cuda.empty_cache()
-    print('Cleaned up model and released resources')
+    print('Closing server...')
 
 
 app = FastAPI(lifespan=lifespan)
