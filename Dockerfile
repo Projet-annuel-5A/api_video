@@ -19,8 +19,18 @@ RUN pip install --no-cache-dir torch torchvision torchaudio --index-url https://
 # Stage 2: Final stage
 FROM python:3.11.9-slim
 
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ffmpeg \
+    libsm6 \
+    libxext6 \
+    && rm -rf /var/lib/apt/lists/*
+
 # Copy only the necessary files from the builder stage
 COPY --from=builder /usr/local /usr/local
+
+COPY application_default_credentials.json /root/.config/gcloud/application_default_credentials.json
+ENV GOOGLE_APPLICATION_CREDENTIALS=/root/.config/gcloud/application_default_credentials.json
+ENV GOOGLE_CLOUD_PROJECT=annual-project-427112
 
 # Set the working directory
 WORKDIR /app
@@ -32,5 +42,5 @@ COPY . .
 # ENTRYPOINT ["python3"]
 
 # Commands to run the application
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8003"]
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8003"]
 EXPOSE 8003
