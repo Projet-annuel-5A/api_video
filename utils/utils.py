@@ -3,7 +3,7 @@ import sys
 import logging
 import configparser
 import pandas as pd
-from typing import Any
+from typing import Any, Dict
 from datetime import datetime
 from supabase import create_client, Client
 
@@ -261,3 +261,25 @@ class Utils:
         except Exception as e:
             self.log.error('Error updating the results from video in the database')
             raise e
+
+    def adjust_values(self, input_dict: Dict[str, float]) -> Dict[str, float]:
+        """
+        Adjusts the values in the input dictionary to ensure their total sum does not exceed 100.
+        This method checks if the total sum of the values in the dictionary is greater than 100.
+        If so, it scales the values down proportionally to make the total sum exactly 100.
+        Parameters:
+            input_dict (Dict[str, float]): A dictionary with string keys and float values to be adjusted.
+        Returns:
+            Dict[str, float]: The adjusted dictionary with values scaled to ensure their total sum is 100
+                              if the initial sum exceeded 100; otherwise, returns the original dictionary.
+        """
+        total_sum = sum(input_dict.values())
+
+        if total_sum <= 100:
+            return input_dict
+
+        # Scale values to make the total sum 100
+        scale_factor = 100 / total_sum
+        adjusted_dict = {k: v * scale_factor for k, v in input_dict.items()}
+
+        return adjusted_dict
