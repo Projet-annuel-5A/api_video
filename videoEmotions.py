@@ -67,17 +67,19 @@ class VideoEmotions:
                     confidence = response[0].probs.data[class_index].item()
                     results[label] = confidence
                 emotions = {k: v * 100 for k, v in sorted(results.items(), key=lambda x: x[1], reverse=True)}
+                adjusted_emotions = self.utils.adjust_values(emotions)
             else:
                 objs = DeepFace.analyze(image, actions=['emotion'])
                 results = objs[0]['emotion']
                 emotions = {k: v for k, v in sorted(results.items(), key=lambda x: x[1], reverse=True)}
+                adjusted_emotions = self.utils.adjust_values(emotions)
         except GoogleAPICallError as e:
             print('An API error occurred: {}'.format(e.message))
-            emotions = {'No face detected': 0.0}
+            adjusted_emotions = {'No face detected': 0.0}
         except Exception as e:
             print('An error occurred: {}'.format(str(e)))
-            emotions = {'No face detected': 0.0}
-        return emotions
+            adjusted_emotions = {'No face detected': 0.0}
+        return adjusted_emotions
 
     def split_and_predict(self, segments: pd.DataFrame) -> List[Dict[str, Dict[str, float]]]:
         """
